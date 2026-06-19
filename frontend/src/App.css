@@ -1,0 +1,530 @@
+.app-shell {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.hero-panel {
+  display: grid;
+  gap: 1.5rem;
+  padding: 2rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(circle at top right, rgba(15, 138, 117, 0.22), transparent 28%),
+    linear-gradient(145deg, rgba(10, 17, 26, 0.95), rgba(18, 28, 37, 0.86));
+  color: var(--surface-text-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.hero-panel__copy {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero-panel h1 {
+  color: var(--surface-text-strong);
+}
+
+.hero-panel__body {
+  max-width: 66ch;
+  color: var(--surface-text);
+  font-size: 1rem;
+}
+
+.hero-panel__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.control-button {
+  border: 1px solid rgba(233, 237, 243, 0.2);
+  background: linear-gradient(135deg, rgba(15, 138, 117, 0.85), rgba(10, 17, 26, 0.5));
+  color: var(--surface-text-strong);
+  border-radius: 999px;
+  padding: 0.8rem 1.15rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms ease, opacity 140ms ease, border-color 140ms ease;
+}
+
+.control-button:hover:enabled {
+  transform: translateY(-1px);
+  border-color: rgba(140, 226, 212, 0.55);
+}
+
+.control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.control-button--secondary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.control-button--ghost {
+  background: transparent;
+}
+
+.control-button--buy {
+  background: linear-gradient(135deg, rgba(15, 138, 117, 0.92), rgba(12, 73, 64, 0.88));
+}
+
+.control-button--sell {
+  background: linear-gradient(135deg, rgba(195, 80, 35, 0.9), rgba(116, 38, 23, 0.88));
+}
+
+.notional-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.notional-chip {
+  border: 1px solid var(--line);
+  background: rgba(19, 33, 45, 0.04);
+  color: var(--text-strong);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notional-chip--selected {
+  border-color: rgba(15, 138, 117, 0.52);
+  background: rgba(15, 138, 117, 0.12);
+}
+
+.input-stack {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.control-input {
+  width: min(240px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: rgba(255, 252, 247, 0.9);
+  color: var(--text-strong);
+  padding: 0.8rem 0.9rem;
+  font: inherit;
+}
+
+.impact-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid rgba(20, 28, 36, 0.1);
+  background: rgba(19, 33, 45, 0.04);
+  color: var(--text-strong);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.impact-chip--buy {
+  border-color: rgba(15, 138, 117, 0.34);
+  background: rgba(15, 138, 117, 0.12);
+  color: #0c5d4f;
+}
+
+.impact-chip--sell {
+  border-color: rgba(195, 80, 35, 0.28);
+  background: rgba(195, 80, 35, 0.12);
+  color: #8a4322;
+}
+
+.eyebrow,
+.section-card__eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.78rem;
+  color: var(--accent-soft);
+}
+
+.status-pill,
+.micro-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid rgba(233, 237, 243, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.85rem;
+  color: var(--surface-text-strong);
+}
+
+.status-pill--accent,
+.metric-card--accent {
+  background: linear-gradient(135deg, rgba(236, 138, 32, 0.2), rgba(15, 138, 117, 0.22));
+  border-color: rgba(236, 138, 32, 0.4);
+}
+
+.metrics-grid,
+.mini-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.metric-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 108px;
+}
+
+.metric-card__label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.metric-card__value {
+  font-size: 1.35rem;
+  line-height: 1.15;
+  color: var(--text-strong);
+}
+
+.banner {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(236, 138, 32, 0.3);
+}
+
+.banner--warning {
+  background: rgba(236, 138, 32, 0.08);
+  color: var(--text-strong);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.market-focus-card {
+  grid-column: 1 / -1;
+}
+
+.section-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.4rem;
+  border-radius: 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.section-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.section-card__body {
+  display: grid;
+  gap: 1rem;
+}
+
+.bullet-list,
+.ordered-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.mix-table {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.chart-summary-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.mix-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.section-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.price-chart {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.price-chart__frame,
+.price-chart__empty {
+  min-height: 320px;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(233, 237, 243, 0.08);
+  background:
+    radial-gradient(circle at top right, rgba(15, 138, 117, 0.22), transparent 26%),
+    linear-gradient(155deg, rgba(10, 17, 26, 0.98), rgba(18, 28, 37, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.price-chart__frame {
+  padding: 0.9rem 1rem 0.55rem;
+}
+
+.price-chart__empty {
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.price-chart__message {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--surface-text);
+  text-align: center;
+}
+
+.price-chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.price-chart__grid-line {
+  stroke: rgba(233, 237, 243, 0.12);
+  stroke-width: 1;
+}
+
+.price-chart__axis-label {
+  fill: rgba(233, 237, 243, 0.62);
+  font-size: 12px;
+}
+
+.price-chart__area {
+  fill: rgba(140, 226, 212, 0.15);
+}
+
+.price-chart__line {
+  fill: none;
+  stroke: #8ce2d4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.price-chart__wick {
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.price-chart__wick--buy {
+  stroke: rgba(69, 198, 170, 0.95);
+}
+
+.price-chart__wick--sell {
+  stroke: rgba(244, 143, 100, 0.95);
+}
+
+.price-chart__wick--last {
+  stroke-width: 2.6;
+}
+
+.price-chart__candle {
+  stroke-width: 1.2;
+}
+
+.price-chart__candle--buy {
+  fill: rgba(69, 198, 170, 0.78);
+  stroke: rgba(140, 226, 212, 0.98);
+}
+
+.price-chart__candle--sell {
+  fill: rgba(244, 143, 100, 0.72);
+  stroke: rgba(255, 196, 166, 0.95);
+}
+
+.price-chart__candle--last {
+  filter: drop-shadow(0 0 10px rgba(255, 246, 234, 0.12));
+}
+
+.price-chart__last-point {
+  fill: #ec8a20;
+  stroke: rgba(10, 17, 26, 0.96);
+  stroke-width: 3;
+}
+
+.price-chart__current-line {
+  stroke: rgba(236, 138, 32, 0.62);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
+.price-chart__current-price {
+  fill: #fff6ea;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.price-chart__current-tag {
+  fill: rgba(233, 237, 243, 0.62);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.price-chart__event-line {
+  stroke-dasharray: 5 5;
+  stroke-width: 1.5;
+}
+
+.price-chart__event-line--buy {
+  stroke: rgba(69, 198, 170, 0.84);
+}
+
+.price-chart__event-line--sell {
+  stroke: rgba(244, 143, 100, 0.84);
+}
+
+.price-chart__event-dot {
+  stroke-width: 3;
+}
+
+.price-chart__event-dot--buy {
+  fill: #45c6aa;
+  stroke: rgba(10, 17, 26, 0.96);
+}
+
+.price-chart__event-dot--sell {
+  fill: #f48f64;
+  stroke: rgba(10, 17, 26, 0.96);
+}
+
+.price-chart__event-label {
+  stroke-width: 1;
+}
+
+.price-chart__event-label--buy {
+  fill: rgba(15, 138, 117, 0.2);
+  stroke: rgba(69, 198, 170, 0.45);
+}
+
+.price-chart__event-label--sell {
+  fill: rgba(195, 80, 35, 0.2);
+  stroke: rgba(244, 143, 100, 0.42);
+}
+
+.price-chart__event-text {
+  fill: #fff6ea;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.price-chart__event-subtext {
+  fill: rgba(233, 237, 243, 0.66);
+  font-size: 11px;
+}
+
+.price-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.price-chart__legend strong {
+  color: var(--text-strong);
+}
+
+.price-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 0.75rem;
+}
+
+.price-strip--chart {
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+}
+
+.price-chip {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--line-soft);
+  background: rgba(19, 33, 45, 0.04);
+}
+
+.price-chip span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.price-chip strong {
+  color: var(--text-strong);
+}
+
+.price-chip--buy {
+  border-color: rgba(15, 138, 117, 0.44);
+  background: rgba(15, 138, 117, 0.12);
+}
+
+.price-chip--sell {
+  border-color: rgba(195, 80, 35, 0.32);
+  background: rgba(195, 80, 35, 0.1);
+}
+
+.price-chip--current {
+  border-color: rgba(236, 138, 32, 0.38);
+  background: rgba(236, 138, 32, 0.12);
+}
+
+@media (max-width: 900px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-panel {
+    padding: 1.4rem;
+  }
+
+  .section-card__header {
+    flex-direction: column;
+  }
+
+  .price-chart__frame,
+  .price-chart__empty {
+    min-height: 280px;
+  }
+}

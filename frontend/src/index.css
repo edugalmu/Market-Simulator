@@ -1,0 +1,108 @@
+:root {
+  --bg: #f4f0e8;
+  --bg-deep: #101924;
+  --panel: rgba(255, 252, 247, 0.82);
+  --line: rgba(20, 28, 36, 0.12);
+  --line-soft: rgba(20, 28, 36, 0.08);
+  --text: #415160;
+  --text-strong: #13212d;
+  --surface-text: rgba(244, 248, 251, 0.76);
+  --surface-text-strong: #f8fbfd;
+  --muted: #6e7f8f;
+  --accent: #0f8a75;
+  --accent-soft: #8ce2d4;
+  --warning: #ec8a20;
+  --shadow-sm: 0 16px 32px rgba(16, 25, 36, 0.06);
+  --shadow-lg: 0 24px 48px rgba(10, 17, 26, 0.28);
+  --sans: 'Aptos', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  --heading: 'Bahnschrift', 'Arial Narrow', var(--sans);
+  --mono: 'Cascadia Code', 'Consolas', monospace;
+  font: 16px/1.5 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(236, 138, 32, 0.14), transparent 24%),
+    radial-gradient(circle at top right, rgba(15, 138, 117, 0.16), transparent 20%),
+    linear-gradient(180deg, #fcfaf6 0%, #f0ebe2 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(16, 25, 36, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 25, 36, 0.03) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent 85%);
+}
+
+#root {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
+}
+
+h1,
+h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--heading);
+  font-weight: 600;
+  line-height: 1.02;
+}
+
+h1 {
+  font-size: clamp(2.6rem, 5vw, 4.9rem);
+  max-width: 12ch;
+}
+
+h2 {
+  font-size: 1.4rem;
+}
+
+p,
+li,
+span,
+strong {
+  overflow-wrap: anywhere;
+}
+
+code {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.45rem;
+  background: rgba(19, 33, 45, 0.08);
+  font-family: var(--mono);
+  color: var(--text-strong);
+}
+
+a {
+  color: inherit;
+}
+
+@media (max-width: 700px) {
+  #root {
+    width: min(100%, calc(100% - 1rem));
+    padding-top: 1rem;
+  }
+}

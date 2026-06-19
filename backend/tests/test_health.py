@@ -1,0 +1,87 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.simulation.live import get_live_simulation_service
+
+
+client = TestClient(app)
+
+
+def test_health_endpoint() -> None:
+    response = client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "Market Simulator API"
+    assert payload["default_compute_mode"] == "cpu"
+
+
+def test_whale_shock_preview_endpoint() -> None:
+    response = client.get("/api/v1/simulation/whale-shock/preview?side=sell&notional=2500")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["shock"]["side"] == "sell"
+    assert payload["order_book_after"]["bid_depth"] < payload["order_book_before"]["bid_depth"]
+
+
+def test_live_simulation_endpoints() -> None:
+    live_service = get_live_simulation_service()
+    live_service.reset()
+
+    start_response = client.post("/api/v1/simulation/live/start?tick_interval_ms=400")
+    assert start_response.status_code == 200
+    start_payload = start_response.json()
+    assert start_payload["status"] == "running"
+    assert start_payload["tick"] >= 1
+
+    read_response = client.get("/api/v1/simulation/live")
+    assert read_response.status_code == 200
+    assert read_response.json()["session_id"] == start_payload["session_id"]
+
+    stop_response = client.post("/api/v1/simulation/live/stop")
+    assert stop_response.status_code == 200
+    assert stop_response.json()["status"] == "stopped"
+
+    live_service.reset()
+
+
+def test_live_whale_order_endpoint_buy_and_sell() -> None:
+    live_service = get_live_simulation_service()
+    live_service.reset()
+
+    start_response = client.post("/api/v1/simulation/live/start?tick_interval_ms=5000")
+    assert start_response.status_code == 200
+
+    before_response = client.get("/api/v1/simulation/live")
+    assert before_response.status_code == 200
+    before_payload = before_response.json()
+
+    buy_response = client.post(
+        "/api/v1/simulation/live/whale-order",
+        json={"side": "buy", "notional": 3000},
+    )
+    assert buy_response.status_code == 200
+    buy_payload = buy_response.json()
+    assert buy_payload["snapshot"]["session_id"] == before_payload["session_id"]
+    assert buy_payload["whale_order"]["side"] == "buy"
+    assert buy_payload["whale_order"]["mid_price_before"] == before_payload["order_book"]["mid_price"]
+    assert buy_payload["whale_order"]["mid_price_after"] >= buy_payload["whale_order"]["mid_price_before"]
+    assert buy_payload["whale_order"]["price_impact_bps"] >= 0
+    assert buy_payload["whale_balance"]["cash_free"] >= 0
+    assert buy_payload["whale_balance"]["asset_free"] >= 0
+
+    sell_response = client.post(
+        "/api/v1/simulation/live/whale-order",
+        json={"side": "sell", "notional": 3000},
+    )
+    assert sell_response.status_code == 200
+    sell_payload = sell_response.json()
+    assert sell_payload["whale_order"]["side"] == "sell"
+    assert sell_payload["whale_order"]["trades_executed"] > 0
+    assert sell_payload["whale_order"]["price_impact_bps"] <= 0
+    assert sell_payload["whale_order"]["remaining_side_depth"] >= 0
+    assert sell_payload["whale_balance"]["cash_free"] >= 0
+    assert sell_payload["whale_balance"]["asset_free"] >= 0
+
+    live_service.reset()
