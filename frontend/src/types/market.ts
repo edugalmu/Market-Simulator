@@ -69,6 +69,18 @@ export type TickReport = {
   mid_price: number
 }
 
+export type OhlcvBar = {
+  tick: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  trades: number
+  whale_side: 'buy' | 'sell' | null
+  whale_impact_bps: number | null
+}
+
 export type LiveWhaleOrderOutcome = {
   tick: number
   side: 'buy' | 'sell'
@@ -99,6 +111,7 @@ export type LiveSimulationSnapshot = {
   order_book: OrderBookSnapshot
   metrics: MarketMetrics
   recent_mid_prices: number[]
+  ohlcv_history: OhlcvBar[]
   last_tick: TickReport | null
   whale_balance: WhaleBalanceSnapshot
   last_whale_order: LiveWhaleOrderOutcome | null

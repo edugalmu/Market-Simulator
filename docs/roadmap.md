@@ -68,8 +68,8 @@ Avance parcial ya implementado:
 - un subconjunto de agentes simples actua por tick con market intents pequenos;
 - la UI ya muestra tick actual, estado, traza de precios y controles de iniciar, detener y avanzar.
 - el usuario ya puede ejecutar `Whale Buy` y `Whale Sell` sobre la sesion viva y ver impacto visible en precio, traza y balance.
-- la UI ya muestra una grafica principal de velas agrupadas desde `recent_mid_prices` para seguir el precio vivo por tick y destacar el ultimo impacto de ballena.
-- el volumen real por barra sigue pendiente hasta que el backend exponga OHLCV o volumen historico autoritativo.
+- la UI ya muestra una grafica principal de OHLCV real por tick desde backend para seguir el precio vivo y destacar el ultimo impacto de ballena.
+- `recent_mid_prices` se mantiene como fallback visual si todavia no hay suficientes barras para dibujar velas.
 
 ## Fase 3. Persistencia y replay
 

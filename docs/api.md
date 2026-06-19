@@ -203,7 +203,20 @@ Respuesta resumida:
   "order_book": {
     "mid_price": 100.0
   },
-  "recent_mid_prices": [100.0],
+  "recent_mid_prices": [100.0, 100.0],
+  "ohlcv_history": [
+    {
+      "tick": 1,
+      "open": 100.0,
+      "high": 100.0,
+      "low": 100.0,
+      "close": 100.0,
+      "volume": 0.0,
+      "trades": 0,
+      "whale_side": null,
+      "whale_impact_bps": null
+    }
+  ],
   "last_tick": {
     "tick": 1,
     "active_agents": 23,
@@ -234,7 +247,8 @@ Campos principales:
 - `tick_interval_ms`: frecuencia objetivo del loop.
 - `order_book`: snapshot autoritativo resumido.
 - `metrics`: metricas agregadas del mercado.
-- `recent_mid_prices`: traza compacta de mid-prices recientes.
+- `recent_mid_prices`: traza compacta de mid-prices recientes para fallback visual.
+- `ohlcv_history`: barras autoritativas por tick con `tick`, `open`, `high`, `low`, `close`, `volume`, `trades` y metadato opcional de ballena.
 - `last_tick`: resumen del ultimo tick ejecutado.
 
 ## POST /api/v1/simulation/live/step
@@ -273,7 +287,8 @@ Reglas actuales:
 - actualiza el snapshot de la sesion;
 - actualiza el balance de la ballena;
 - deja un sesgo de impacto que decae en varios ticks para que el shock sea visible y jugable;
-- registra `last_whale_order` en la sesion viva.
+- registra `last_whale_order` en la sesion viva;
+- anota la barra OHLCV del tick del shock con `whale_side` y `whale_impact_bps`.
 
 Respuesta resumida:
 
@@ -286,6 +301,19 @@ Respuesta resumida:
     "order_book": {
       "mid_price": 100.31
     },
+    "ohlcv_history": [
+      {
+        "tick": 29,
+        "open": 100.16,
+        "high": 100.38,
+        "low": 100.16,
+        "close": 100.31,
+        "volume": 29.887,
+        "trades": 4,
+        "whale_side": "buy",
+        "whale_impact_bps": 14.98
+      }
+    ],
     "last_whale_order": {
       "side": "buy",
       "impact_label": "BUY IMPACT",

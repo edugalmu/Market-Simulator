@@ -24,3 +24,7 @@ frontend/dist/
 *.db
 *.parquet
 *.log
+
+# Packaging artifacts
+backend/build/
+release/

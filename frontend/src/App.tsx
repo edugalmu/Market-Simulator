@@ -34,11 +34,41 @@ function App() {
     !hasValidWhaleNotional
   const lastWhaleOrder = liveSession?.last_whale_order ?? null
   const whaleBalance = liveSession?.whale_balance ?? null
+  const chartBars = (liveSession?.ohlcv_history ?? []).slice(-80)
   const chartPrices = (liveSession?.recent_mid_prices ?? []).slice(-80)
-  const latestChartPrices = chartPrices.slice(-8)
+  const hasAuthoritativeChart = chartBars.length >= 2
+  const latestChartEntries = hasAuthoritativeChart
+    ? chartBars.slice(-8).map((bar) => ({
+        tick: bar.tick,
+        price: bar.close,
+        impactSide: bar.whale_side,
+        isCurrent: bar.tick === (liveSession?.tick ?? -1),
+      }))
+    : chartPrices.slice(-8).map((price, index, latestPrices) => {
+        const fullIndex = chartPrices.length - latestPrices.length + index
+        const tick = Math.max(
+          (liveSession?.tick ?? 0) - (chartPrices.length - 1 - fullIndex),
+          0,
+        )
+
+        return {
+          tick,
+          price,
+          impactSide: lastWhaleOrder?.tick === tick ? lastWhaleOrder.side : null,
+          isCurrent: tick === (liveSession?.tick ?? -1),
+        }
+      })
   const lastImpactSummary = lastWhaleOrder
     ? `${lastWhaleOrder.side.toUpperCase()} ${lastWhaleOrder.price_impact_bps >= 0 ? '+' : ''}${lastWhaleOrder.price_impact_bps.toFixed(2)} bps`
     : 'Sin orden'
+  const chartSourceTag = hasAuthoritativeChart
+    ? `${chartBars.length} barras · OHLCV real`
+    : chartPrices.length > 0
+      ? `${chartPrices.length} muestras · velas agrupadas`
+      : 'sin muestras'
+  const chartSourceNote = hasAuthoritativeChart
+    ? 'La grafica usa barras OHLCV generadas por backend por tick. El volumen refleja la cantidad ejecutada y el impacto de ballena se ancla al tick real del evento.'
+    : 'La grafica agrupa el `mid-price` vivo en bloques para construir velas simples con apertura, maximo, minimo y cierre. El volumen real por barra todavia no viene del backend, asi que este fallback prioriza la lectura visual del movimiento.'
 
   const architecturePillars = [
     'Backend FastAPI desacoplado de la UI',
@@ -134,7 +164,7 @@ function App() {
           <SectionCard
             title="Mercado en vivo"
             eyebrow="Grafica principal"
-            aside={<span className="micro-tag">{chartPrices.length > 0 ? `${chartPrices.length} muestras` : 'sin muestras'}</span>}
+            aside={<span className="micro-tag">{chartSourceTag}</span>}
           >
             <div className="chart-summary-grid">
               <MetricCard
@@ -158,44 +188,34 @@ function App() {
 
             <PriceChart
               prices={chartPrices}
+              bars={chartBars}
               currentTick={liveSession?.tick ?? 0}
               lastWhaleOrder={lastWhaleOrder}
               mode="candles"
             />
 
-            {latestChartPrices.length > 0 ? (
+            {latestChartEntries.length > 0 ? (
               <div className="price-strip price-strip--chart">
-                {latestChartPrices.map((price, index) => {
-                  const fullIndex = chartPrices.length - latestChartPrices.length + index
-                  const tickLabel = Math.max(
-                    (liveSession?.tick ?? 0) - (chartPrices.length - 1 - fullIndex),
-                    0,
-                  )
-                  const impactTick = lastWhaleOrder?.tick === tickLabel
-                  const isCurrent = tickLabel === (liveSession?.tick ?? -1)
+                {latestChartEntries.map((entry) => {
                   const chipClassName = [
                     'price-chip',
-                    isCurrent ? 'price-chip--current' : '',
-                    impactTick ? `price-chip--${lastWhaleOrder?.side ?? 'impact'}` : '',
+                    entry.isCurrent ? 'price-chip--current' : '',
+                    entry.impactSide ? `price-chip--${entry.impactSide}` : '',
                   ]
                     .filter(Boolean)
                     .join(' ')
 
                   return (
-                    <div className={chipClassName} key={`${price}-${tickLabel}`}>
-                      <span>T{tickLabel}</span>
-                      <strong>${price.toFixed(2)}</strong>
+                    <div className={chipClassName} key={`${entry.tick}-${entry.price}`}>
+                      <span>T{entry.tick}</span>
+                      <strong>${entry.price.toFixed(2)}</strong>
                     </div>
                   )
                 })}
               </div>
             ) : null}
 
-            <p className="section-note">
-              La grafica agrupa el `mid-price` vivo en bloques para construir velas simples con
-              apertura, maximo, minimo y cierre. El volumen real por barra todavia no viene del
-              backend, asi que esta primera version prioriza la lectura visual del movimiento.
-            </p>
+            <p className="section-note">{chartSourceNote}</p>
           </SectionCard>
         </div>
 

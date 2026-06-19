@@ -64,6 +64,18 @@ class TickReport(BaseModel):
     mid_price: float
 
 
+class OhlcvBar(BaseModel):
+    tick: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    trades: int
+    whale_side: Literal["buy", "sell"] | None = None
+    whale_impact_bps: float | None = None
+
+
 class LiveWhaleOrderRequest(BaseModel):
     side: Literal["buy", "sell"]
     notional: float = Field(gt=0)
@@ -110,6 +122,7 @@ class LiveSimulationSnapshot(BaseModel):
     order_book: OrderBookSnapshot
     metrics: MarketMetrics
     recent_mid_prices: list[float] = Field(default_factory=list)
+    ohlcv_history: list[OhlcvBar] = Field(default_factory=list)
     last_tick: TickReport | None = None
     whale_balance: WhaleBalanceSnapshot
     last_whale_order: LiveWhaleOrderOutcome | None = None

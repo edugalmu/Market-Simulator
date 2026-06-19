@@ -63,8 +63,8 @@ Implementado:
 - El backend tambien puede crear una sesion viva minima en memoria con ticks automaticos.
 - Hay modelos iniciales para agentes, ledger, order book, shocks, eventos y compute backend.
 - Hay matching minimo para market sweeps, liquidacion del whale sintetico, market intents pequenos por tick y orden directa de ballena sobre la sesion viva.
-- La UI ya muestra una grafica principal de velas agrupadas derivadas de `recent_mid_prices` y marca el ultimo impacto de ballena.
-- La API aun no expone OHLCV ni volumen historico autoritativo por barra; la UI deja el volumen como pendiente.
+- La UI ya muestra una grafica principal basada en `ohlcv_history` por tick y marca el ultimo impacto de ballena.
+- La API de sesion viva ya expone `ohlcv_history` con `open`, `high`, `low`, `close`, `volume`, `trades`, `whale_side` y `whale_impact_bps`; `recent_mid_prices` queda como fallback de compatibilidad.
 - La GPU solo se resuelve por configuracion; no hay calculo GPU real.
 - La persistencia SQLite/Parquet esta aprobada, pero aun no implementada.
 - El matching engine continuo completo sigue pendiente; lo implementado hoy cubre whale preview, sesion viva sintetica con libro resembrado por tick y modo jugable de ballena con impacto visible durante varios ticks.

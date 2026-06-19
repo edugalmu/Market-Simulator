@@ -19,6 +19,7 @@ from app.simulation.models import (
     LiveSimulationSnapshot,
     LiveWhaleOrderOutcome,
     LiveWhaleOrderResponse,
+    OhlcvBar,
     SessionConfig,
     TickReport,
     WhaleBalanceSnapshot,
@@ -28,6 +29,7 @@ from app.simulation.scheduler import select_active_agent_count
 
 DEFAULT_TICK_INTERVAL_MS = 750
 MAX_PRICE_HISTORY = 24
+MAX_OHLCV_HISTORY = 80
 WHALE_AGENT_ID = 0
 WHALE_INITIAL_CASH = 250_000.0
 WHALE_INITIAL_ASSET = 5_000.0
@@ -70,6 +72,9 @@ class LiveSessionState:
     cumulative_matched_quantity: float = 0.0
     price_history: deque[float] = field(
         default_factory=lambda: deque(maxlen=MAX_PRICE_HISTORY)
+    )
+    ohlcv_history: deque[OhlcvBar] = field(
+        default_factory=lambda: deque(maxlen=MAX_OHLCV_HISTORY)
     )
     runtime_state: dict[int, AgentRuntimeState] = field(default_factory=dict)
     last_tick: TickReport | None = None
@@ -255,6 +260,7 @@ class LiveSimulationService:
         trades_executed = 0
         matched_notional = 0.0
         matched_quantity = 0.0
+        observed_prices = [price_before]
 
         for profile in sampled_profiles:
             runtime = session.runtime_state[profile.agent_id]
@@ -281,6 +287,8 @@ class LiveSimulationService:
             trades_executed += result.trades_executed
             matched_notional += result.matched_notional
             matched_quantity += result.quantity_matched
+            if result.average_fill_price > 0:
+                observed_prices.append(result.average_fill_price)
 
         flow_imbalance = buy_orders - sell_orders
         drift_bps = max(
@@ -300,6 +308,7 @@ class LiveSimulationService:
         price_after = session.order_book.mid_price or reference_price
         session.last_price = round(price_after, 4)
         session.price_history.append(session.last_price)
+        observed_prices.append(price_after)
         session.updated_at = _utc_now()
         session.structural_bias_bps = _decay_bias(session.structural_bias_bps)
         session.cumulative_trades += trades_executed
@@ -324,6 +333,15 @@ class LiveSimulationService:
             price_change_bps=price_change_bps,
             mid_price=session.last_price,
         )
+        self._append_ohlcv_bar(
+            session,
+            tick=session.tick,
+            open_price=price_before,
+            close_price=session.last_price,
+            observed_prices=observed_prices,
+            volume=matched_quantity,
+            trades=trades_executed,
+        )
 
     def _execute_whale_order_locked(
         self,
@@ -333,6 +351,7 @@ class LiveSimulationService:
         notional: float,
     ) -> LiveWhaleOrderResponse:
         price_before = session.last_price
+        observed_prices = [price_before]
         whale_balance_before = session.whale_ledger.get_balance(WHALE_AGENT_ID)
 
         if side == OrderSide.BUY:
@@ -400,6 +419,9 @@ class LiveSimulationService:
                 ((price_after - price_before) / price_before) * 10_000,
                 4,
             )
+        if result.average_fill_price > 0:
+            observed_prices.append(result.average_fill_price)
+        observed_prices.append(price_after)
 
         session.tick += 1
         session.last_price = round(price_after, 4)
@@ -441,6 +463,17 @@ class LiveSimulationService:
             matched_quantity=result.quantity_matched,
             price_change_bps=price_impact_bps,
             mid_price=session.last_price,
+        )
+        self._append_ohlcv_bar(
+            session,
+            tick=session.tick,
+            open_price=price_before,
+            close_price=session.last_price,
+            observed_prices=observed_prices,
+            volume=result.quantity_matched,
+            trades=result.trades_executed,
+            whale_side=side,
+            whale_impact_bps=price_impact_bps,
         )
 
         whale_balance = self._build_whale_balance_snapshot(session)
@@ -546,6 +579,7 @@ class LiveSimulationService:
                 fallback_price=fallback_price,
             ),
             recent_mid_prices=list(session.price_history),
+            ohlcv_history=list(session.ohlcv_history),
             last_tick=session.last_tick,
             whale_balance=self._build_whale_balance_snapshot(session),
             last_whale_order=session.last_whale_order,
@@ -567,6 +601,41 @@ class LiveSimulationService:
             asset_free=round(whale_balance.asset_free, 6),
             asset_reserved=round(whale_balance.asset_reserved, 6),
             total_equity=round(whale_balance.total_equity(session.last_price), 6),
+        )
+
+    def _append_ohlcv_bar(
+        self,
+        session: LiveSessionState,
+        *,
+        tick: int,
+        open_price: float,
+        close_price: float,
+        observed_prices: list[float],
+        volume: float,
+        trades: int,
+        whale_side: OrderSide | None = None,
+        whale_impact_bps: float | None = None,
+    ) -> None:
+        candle_prices = [
+            round(price, 4)
+            for price in [open_price, *observed_prices, close_price]
+            if price > 0
+        ]
+        if not candle_prices:
+            candle_prices = [round(close_price, 4)]
+
+        session.ohlcv_history.append(
+            OhlcvBar(
+                tick=tick,
+                open=round(open_price, 4),
+                high=max(candle_prices),
+                low=min(candle_prices),
+                close=round(close_price, 4),
+                volume=round(volume, 6),
+                trades=trades,
+                whale_side=whale_side.value if whale_side is not None else None,
+                whale_impact_bps=whale_impact_bps,
+            )
         )
 
 

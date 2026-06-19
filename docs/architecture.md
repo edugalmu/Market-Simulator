@@ -95,12 +95,12 @@ Backend FastAPI
   -> selecciona un subconjunto activo por tick
   -> ejecuta market intents pequenos sobre liquidez sintetica
   -> recompone el libro alrededor del nuevo precio
-  -> expone tick, metricas y `recent_mid_prices` para la visualizacion viva
+  -> expone tick, metricas, `recent_mid_prices` y `ohlcv_history` para la visualizacion viva
 ```
 
 El flujo todavia no implementa persistencia, ordenes limite vivas, cancelaciones, replay ni streaming.
 
-La visualizacion principal actual no recibe OHLCV autoritativo del backend. La UI agrupa `recent_mid_prices` por bloques para dibujar velas simples con apertura, maximo, minimo y cierre, mantiene el ultimo impacto de ballena como marcador y deja el volumen por barra como pendiente.
+La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI mantiene `recent_mid_prices` solo como fallback cuando aun no hay suficientes barras para dibujar velas.
 
 ## Limite funcional de la primera fase
 
@@ -122,7 +122,7 @@ La interfaz puede:
 - mostrar health, bootstrap, snapshots y metricas;
 - enviar configuracion de sesiones cuando existan endpoints;
 - disparar shocks cuando existan endpoints;
-- agrupar `recent_mid_prices` para visualizacion local cuando el backend aun no expone OHLCV;
+- usar `ohlcv_history` como fuente preferente para la grafica principal y `recent_mid_prices` solo como fallback;
 - reproducir eventos cuando exista replay.
 
 La interfaz no puede:
@@ -130,7 +130,7 @@ La interfaz no puede:
 - decidir fills;
 - calcular balances autoritativos;
 - mutar el order book como fuente de verdad;
-- inventar volumen real de mercado que el backend no haya calculado;
+- inventar volumen real de mercado fuera de `matched_quantity` y `trades_executed` del backend;
 - almacenar memoria estrategica de agentes.
 
 ### Backend API

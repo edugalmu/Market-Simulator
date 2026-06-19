@@ -13,7 +13,7 @@ Implementado y verificable en el repositorio:
 - API HTTP local bajo `/api/v1`.
 - Bootstrap deterministico de 1,000 agentes por defecto.
 - Sesion viva minima en memoria con ticks automaticos y controles de iniciar, detener, avanzar y operar como ballena.
-- Grafica principal tipo velas agrupadas en la UI para seguir la sesion viva por tick y ver el ultimo impacto de ballena.
+- Grafica principal con OHLCV real por tick desde backend en la UI, con fallback local si aun faltan barras suficientes.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.
@@ -110,7 +110,7 @@ Rutas utiles:
 - Live session: `http://127.0.0.1:8000/api/v1/simulation/live`
 - Live whale order: `http://127.0.0.1:8000/api/v1/simulation/live/whale-order`
 
-Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual y ver el efecto en la grafica principal de velas agrupadas, el precio, la traza reciente y el balance.
+Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual y ver el efecto en la grafica principal basada en `ohlcv_history`, el precio, la traza reciente y el balance.
 
 ## Tests y checks
 
