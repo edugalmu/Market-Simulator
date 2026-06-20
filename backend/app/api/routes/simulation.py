@@ -132,6 +132,38 @@ def play_live_simulation(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/live/game/start", response_model=LiveSimulationSnapshot)
+def start_live_game(
+    live_service=Depends(get_live_simulation_service),
+    mode: Literal["whale_challenge"] = Query(default="whale_challenge"),
+    duration_ticks: int = Query(default=60, ge=10, le=600),
+) -> LiveSimulationSnapshot:
+    try:
+        return live_service.start_game(mode=mode, duration_ticks=duration_ticks)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/live/game/end", response_model=LiveSimulationSnapshot)
+def end_live_game(
+    live_service=Depends(get_live_simulation_service),
+) -> LiveSimulationSnapshot:
+    try:
+        return live_service.end_game()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/live/game/reset", response_model=LiveSimulationSnapshot)
+def reset_live_game(
+    live_service=Depends(get_live_simulation_service),
+) -> LiveSimulationSnapshot:
+    try:
+        return live_service.reset_game()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/live", response_model=LiveSimulationSnapshot)
 def read_live_simulation(
     live_service=Depends(get_live_simulation_service),

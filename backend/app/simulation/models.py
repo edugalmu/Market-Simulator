@@ -110,6 +110,33 @@ class LiveWhaleOrderOutcome(WhaleShockOutcome):
     impact_label: str
 
 
+class GameScoreBreakdown(BaseModel):
+    pnl_score: float = 0.0
+    impact_score: float = 0.0
+    volume_score: float = 0.0
+
+
+class GameFinalResult(BaseModel):
+    score: float
+    pnl_executed: float
+    max_impact_bps: float
+    total_volume: float
+    whale_orders: int
+    ending_price: float
+    starting_price: float
+
+
+class LiveGameState(BaseModel):
+    mode: Literal["whale_challenge"] | None = None
+    status: Literal["idle", "running", "ended"] = "idle"
+    started_at_tick: int | None = None
+    duration_ticks: int = 60
+    remaining_ticks: int = 60
+    score: float = 0.0
+    score_breakdown: GameScoreBreakdown = Field(default_factory=GameScoreBreakdown)
+    final_result: GameFinalResult | None = None
+
+
 class LiveSimulationSnapshot(BaseModel):
     session_id: str
     status: Literal["running", "stopped"]
@@ -126,6 +153,7 @@ class LiveSimulationSnapshot(BaseModel):
     last_tick: TickReport | None = None
     whale_balance: WhaleBalanceSnapshot
     last_whale_order: LiveWhaleOrderOutcome | None = None
+    game: LiveGameState = Field(default_factory=LiveGameState)
     notes: list[str] = Field(default_factory=list)
 
 

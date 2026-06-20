@@ -334,6 +334,96 @@ export function useDashboardData() {
     }
   }
 
+  async function startLiveGame(durationTicks = 60) {
+    setState((current) => ({
+      ...current,
+      actionLoading: true,
+      liveError: null,
+    }))
+
+    try {
+      const liveSession = await marketApi.startLiveGame(durationTicks)
+      if (liveSession.status === 'running') {
+        startPolling(liveSession.tick_interval_ms)
+      }
+
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveLoading: false,
+        liveError: null,
+        liveSession,
+      }))
+    } catch (error: unknown) {
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveError:
+          error instanceof Error ? error.message : 'No se pudo iniciar el reto.',
+      }))
+    }
+  }
+
+  async function endLiveGame() {
+    setState((current) => ({
+      ...current,
+      actionLoading: true,
+      liveError: null,
+    }))
+
+    try {
+      const liveSession = await marketApi.endLiveGame()
+      if (liveSession.status === 'running') {
+        startPolling(liveSession.tick_interval_ms)
+      }
+
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveLoading: false,
+        liveError: null,
+        liveSession,
+      }))
+    } catch (error: unknown) {
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveError:
+          error instanceof Error ? error.message : 'No se pudo terminar el reto.',
+      }))
+    }
+  }
+
+  async function resetLiveGame() {
+    setState((current) => ({
+      ...current,
+      actionLoading: true,
+      liveError: null,
+    }))
+
+    try {
+      const liveSession = await marketApi.resetLiveGame()
+      if (liveSession.status === 'running') {
+        startPolling(liveSession.tick_interval_ms)
+      }
+
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveLoading: false,
+        liveError: null,
+        liveSession,
+      }))
+    } catch (error: unknown) {
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveError:
+          error instanceof Error ? error.message : 'No se pudo reiniciar el reto.',
+      }))
+    }
+  }
+
   async function stepLiveSession(ticks = 1) {
     setState((current) => ({
       ...current,
@@ -390,6 +480,9 @@ export function useDashboardData() {
     ...state,
     startLiveSession,
     playLiveSession,
+    startLiveGame,
+    endLiveGame,
+    resetLiveGame,
     stopLiveSession,
     stepLiveSession,
     executeWhaleOrder,

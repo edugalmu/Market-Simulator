@@ -93,3 +93,38 @@ def test_live_whale_order_endpoint_buy_and_sell() -> None:
     assert sell_payload["whale_balance"]["asset_free"] >= 0
 
     live_service.reset()
+
+
+def test_live_game_endpoints() -> None:
+    live_service = get_live_simulation_service()
+    live_service.reset()
+
+    start_response = client.post("/api/v1/simulation/live/start?tick_interval_ms=750")
+    assert start_response.status_code == 200
+
+    game_start_response = client.post("/api/v1/simulation/live/game/start?duration_ticks=60")
+    assert game_start_response.status_code == 200
+    assert game_start_response.json()["game"]["status"] == "running"
+
+    step_response = client.post("/api/v1/simulation/live/step?ticks=3")
+    assert step_response.status_code == 200
+    assert step_response.json()["game"]["remaining_ticks"] == 57
+
+    whale_response = client.post(
+        "/api/v1/simulation/live/whale-order",
+        json={"side": "buy", "notional": 3000},
+    )
+    assert whale_response.status_code == 200
+    assert whale_response.json()["snapshot"]["game"]["score"] > 0
+
+    end_response = client.post("/api/v1/simulation/live/game/end")
+    assert end_response.status_code == 200
+    assert end_response.json()["game"]["status"] == "ended"
+    assert end_response.json()["game"]["final_result"] is not None
+
+    reset_response = client.post("/api/v1/simulation/live/game/reset")
+    assert reset_response.status_code == 200
+    assert reset_response.json()["game"]["status"] == "idle"
+    assert reset_response.json()["game"]["final_result"] is None
+
+    live_service.reset()

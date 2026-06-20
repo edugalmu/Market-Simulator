@@ -228,6 +228,7 @@ Respuesta resumida:
 ```
 
 La respuesta real incluye `agent_mix`, `metrics`, timestamps y el snapshot completo del libro.
+Tambien incluye el bloque `game`, inicialmente en estado `idle`, para soportar el minijuego local sobre la misma sesion viva.
 
 Errores:
 
@@ -278,6 +279,61 @@ Campos principales:
 - `recent_mid_prices`: traza compacta de mid-prices recientes para fallback visual.
 - `ohlcv_history`: barras autoritativas por tick con `tick`, `open`, `high`, `low`, `close`, `volume`, `trades` y metadato opcional de ballena.
 - `last_tick`: resumen del ultimo tick ejecutado.
+- `game`: estado del reto local actual con `mode`, `status`, `duration_ticks`, `remaining_ticks`, `score`, `score_breakdown` y `final_result` cuando aplique.
+
+## POST /api/v1/simulation/live/game/start
+
+Inicia o reinicia el reto local `whale_challenge` sobre la sesion viva actual sin resetear la sesion de mercado.
+
+Parametros query:
+
+- `mode`: por ahora solo `whale_challenge`.
+- `duration_ticks`: entero entre `10` y `600`, por defecto `60`.
+
+Respuesta resumida:
+
+```json
+{
+  "session_id": "live-7-8453eb37",
+  "status": "running",
+  "tick": 601,
+  "game": {
+    "mode": "whale_challenge",
+    "status": "running",
+    "started_at_tick": 601,
+    "duration_ticks": 60,
+    "remaining_ticks": 60,
+    "score": 0.0,
+    "score_breakdown": {
+      "pnl_score": 0.0,
+      "impact_score": 0.0,
+      "volume_score": 0.0
+    },
+    "final_result": null
+  }
+}
+```
+
+Errores:
+
+- `404` si no existe ninguna sesion viva actual.
+- `422` si FastAPI rechaza los parametros por tipo o rango.
+
+## POST /api/v1/simulation/live/game/end
+
+Termina el reto local actual y congela el score y el `final_result` sobre la sesion viva en curso.
+
+Errores:
+
+- `404` si no existe ninguna sesion viva actual.
+
+## POST /api/v1/simulation/live/game/reset
+
+Limpia el estado del reto local actual y devuelve el bloque `game` a `idle` sin reiniciar la sesion de mercado.
+
+Errores:
+
+- `404` si no existe ninguna sesion viva actual.
 
 ## POST /api/v1/simulation/live/step
 

@@ -157,6 +157,37 @@ def test_live_session_play_resumes_without_resetting_state() -> None:
     assert resumed.status == "running"
 
 
+def test_live_game_challenge_tracks_countdown_score_and_final_result() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=31), gpu_enabled=False, auto_run=False)
+
+    started = service.start_game(duration_ticks=60)
+    assert started.game.status == "running"
+    assert started.game.mode == "whale_challenge"
+    assert started.game.remaining_ticks == 60
+
+    advanced = service.step(ticks=4)
+    assert advanced.game.remaining_ticks == 56
+
+    whale_response = service.execute_whale_order(side="buy", notional=3_000.0)
+    assert whale_response.snapshot.game.remaining_ticks == 55
+    assert whale_response.snapshot.game.score > 0
+    assert whale_response.snapshot.game.score_breakdown.volume_score > 0
+
+    ended = service.end_game()
+    assert ended.game.status == "ended"
+    assert ended.game.final_result is not None
+    assert ended.game.final_result.whale_orders == 1
+
+    reset = service.reset_game()
+    service.reset()
+
+    assert reset.game.status == "idle"
+    assert reset.game.final_result is None
+    assert reset.game.score == 0
+    assert reset.game.remaining_ticks == 60
+
+
 def test_live_whale_order_is_deterministic_for_same_seed() -> None:
     service_a = LiveSimulationService()
     service_b = LiveSimulationService()

@@ -90,6 +90,7 @@ Frontend React
   -> consulta snapshot /api/v1/simulation/live
   -> inicia o reinicia la sesion viva
   -> poll con una cadencia alineada al `tick_interval_ms` activo para reflejar los modos normal, rapido y muy rapido
+  -> puede iniciar y cerrar un reto local `whale_challenge` sobre la misma sesion viva
 Backend FastAPI
   -> mantiene una sesion en memoria
   -> selecciona un subconjunto activo por tick
@@ -102,7 +103,7 @@ Frontend React
 
 El flujo todavia no implementa persistencia, ordenes limite vivas, cancelaciones, replay ni streaming.
 
-La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI puede reagrupar esas barras en marcos 1s/5s/10s/30s/1 min sin recalcular fills ni balances, preservando el ultimo impacto de ballena dentro de la vela agregada correspondiente y limitando la ventana visible para no saturar la grafica. `recent_mid_prices` se mantiene solo como fallback cuando aun no hay suficientes barras para dibujar velas.
+La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI puede reagrupar esas barras en marcos 1s/5s/10s/30s/1 min sin recalcular fills ni balances, preservando el ultimo impacto de ballena dentro de la vela agregada correspondiente y limitando la ventana visible para no saturar la grafica. Sobre esa misma sesion viva ahora existe un minijuego local `Whale Challenge - 60 segundos`, con estado de partida y score derivados del mismo snapshot vivo. `recent_mid_prices` se mantiene solo como fallback cuando aun no hay suficientes barras para dibujar velas.
 
 ## Limite funcional de la primera fase
 

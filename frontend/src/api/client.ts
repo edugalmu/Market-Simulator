@@ -63,6 +63,23 @@ export const marketApi = {
       { method: 'POST' },
     )
   },
+  startLiveGame(durationTicks = 60, signal?: AbortSignal) {
+    return fetchJson<LiveSimulationSnapshot>(
+      `/simulation/live/game/start?duration_ticks=${durationTicks}`,
+      signal,
+      { method: 'POST' },
+    )
+  },
+  endLiveGame(signal?: AbortSignal) {
+    return fetchJson<LiveSimulationSnapshot>('/simulation/live/game/end', signal, {
+      method: 'POST',
+    })
+  },
+  resetLiveGame(signal?: AbortSignal) {
+    return fetchJson<LiveSimulationSnapshot>('/simulation/live/game/reset', signal, {
+      method: 'POST',
+    })
+  },
   stepLiveSimulation(ticks = 1, signal?: AbortSignal) {
     return fetchJson<LiveSimulationSnapshot>(
       `/simulation/live/step?ticks=${ticks}`,

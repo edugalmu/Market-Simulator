@@ -16,6 +16,9 @@ from app.core.order_book import OrderBook
 from app.simulation.engine import SimulationEngine
 from app.simulation.models import (
     AgentMixEntry,
+    GameFinalResult,
+    GameScoreBreakdown,
+    LiveGameState,
     LiveSimulationSnapshot,
     LiveWhaleOrderOutcome,
     LiveWhaleOrderResponse,
@@ -37,6 +40,8 @@ WHALE_INITIAL_CASH = 250_000.0
 WHALE_INITIAL_ASSET = 5_000.0
 SHOCK_BIAS_DECAY = 0.72
 MAX_SHOCK_BIAS_BPS = 85.0
+WHALE_CHALLENGE_MODE = "whale_challenge"
+WHALE_CHALLENGE_DURATION_TICKS = 60
 
 
 def _utc_now() -> str:
@@ -49,6 +54,29 @@ class AgentRuntimeState:
     aggression_level: float
     cooldown_ticks: int
     last_action_tick: int = -10_000
+
+
+@dataclass(slots=True)
+class GameRuntimeState:
+    mode: str | None = None
+    status: str = "idle"
+    started_at_tick: int | None = None
+    duration_ticks: int = WHALE_CHALLENGE_DURATION_TICKS
+    remaining_ticks: int = WHALE_CHALLENGE_DURATION_TICKS
+    score: float = 0.0
+    score_breakdown: dict[str, float] = field(
+        default_factory=lambda: {
+            "pnl_score": 0.0,
+            "impact_score": 0.0,
+            "volume_score": 0.0,
+        }
+    )
+    final_result: GameFinalResult | None = None
+    starting_price: float | None = None
+    total_whale_impact_bps: float = 0.0
+    max_whale_impact_bps: float = 0.0
+    total_whale_volume: float = 0.0
+    whale_orders: int = 0
 
 
 @dataclass(slots=True)
@@ -79,6 +107,7 @@ class LiveSessionState:
         default_factory=lambda: deque(maxlen=MAX_OHLCV_HISTORY)
     )
     runtime_state: dict[int, AgentRuntimeState] = field(default_factory=dict)
+    game: GameRuntimeState = field(default_factory=GameRuntimeState)
     last_tick: TickReport | None = None
     last_whale_order: LiveWhaleOrderOutcome | None = None
 
@@ -259,6 +288,51 @@ class LiveSimulationService:
 
         return snapshot
 
+    def start_game(
+        self,
+        *,
+        mode: str = WHALE_CHALLENGE_MODE,
+        duration_ticks: int = WHALE_CHALLENGE_DURATION_TICKS,
+    ) -> LiveSimulationSnapshot:
+        with self._lock:
+            if self._session is None:
+                raise LookupError("No live simulation session is currently active.")
+
+            session = self._session
+            session.game = GameRuntimeState(
+                mode=mode,
+                status="running",
+                started_at_tick=session.tick,
+                duration_ticks=duration_ticks,
+                remaining_ticks=duration_ticks,
+                starting_price=session.last_price,
+            )
+            session.updated_at = _utc_now()
+            self._refresh_game_score_locked(session)
+
+            return self._build_snapshot(session)
+
+    def end_game(self) -> LiveSimulationSnapshot:
+        with self._lock:
+            if self._session is None:
+                raise LookupError("No live simulation session is currently active.")
+
+            self._end_game_locked(self._session)
+            return self._build_snapshot(self._session)
+
+    def reset_game(self) -> LiveSimulationSnapshot:
+        with self._lock:
+            if self._session is None:
+                raise LookupError("No live simulation session is currently active.")
+
+            duration_ticks = self._session.game.duration_ticks or WHALE_CHALLENGE_DURATION_TICKS
+            self._session.game = GameRuntimeState(
+                duration_ticks=duration_ticks,
+                remaining_ticks=duration_ticks,
+            )
+            self._session.updated_at = _utc_now()
+            return self._build_snapshot(self._session)
+
     def reset(self) -> None:
         self._stop(clear_session=True)
 
@@ -410,6 +484,7 @@ class LiveSimulationService:
             volume=matched_quantity,
             trades=trades_executed,
         )
+        self._update_game_state_locked(session)
 
     def _execute_whale_order_locked(
         self,
@@ -543,6 +618,8 @@ class LiveSimulationService:
             whale_side=side,
             whale_impact_bps=price_impact_bps,
         )
+        self._record_whale_game_activity_locked(session, whale_order)
+        self._update_game_state_locked(session)
 
         whale_balance = self._build_whale_balance_snapshot(session)
         snapshot = self._build_snapshot(session)
@@ -651,6 +728,7 @@ class LiveSimulationService:
             last_tick=session.last_tick,
             whale_balance=self._build_whale_balance_snapshot(session),
             last_whale_order=session.last_whale_order,
+            game=self._build_game_snapshot(session),
             notes=[
                 "Live session runs in memory and advances by tick while the app process stays open.",
                 "Agents currently send small market intents against replenished synthetic liquidity.",
@@ -705,6 +783,79 @@ class LiveSimulationService:
                 whale_impact_bps=whale_impact_bps,
             )
         )
+
+    def _build_game_snapshot(self, session: LiveSessionState) -> LiveGameState:
+        return LiveGameState(
+            mode=session.game.mode,
+            status=session.game.status,
+            started_at_tick=session.game.started_at_tick,
+            duration_ticks=session.game.duration_ticks,
+            remaining_ticks=session.game.remaining_ticks,
+            score=round(session.game.score, 6),
+            score_breakdown=GameScoreBreakdown(**session.game.score_breakdown),
+            final_result=session.game.final_result,
+        )
+
+    def _update_game_state_locked(self, session: LiveSessionState) -> None:
+        if session.game.status != "running" or session.game.started_at_tick is None:
+            return
+
+        elapsed_ticks = max(session.tick - session.game.started_at_tick, 0)
+        session.game.remaining_ticks = max(session.game.duration_ticks - elapsed_ticks, 0)
+        self._refresh_game_score_locked(session)
+        if session.game.remaining_ticks == 0:
+            self._end_game_locked(session)
+
+    def _record_whale_game_activity_locked(
+        self,
+        session: LiveSessionState,
+        whale_order: LiveWhaleOrderOutcome,
+    ) -> None:
+        if session.game.status != "running":
+            return
+
+        session.game.total_whale_impact_bps = round(
+            session.game.total_whale_impact_bps + abs(whale_order.price_impact_bps),
+            6,
+        )
+        session.game.max_whale_impact_bps = round(
+            max(session.game.max_whale_impact_bps, abs(whale_order.price_impact_bps)),
+            6,
+        )
+        session.game.total_whale_volume = round(
+            session.game.total_whale_volume + whale_order.matched_notional,
+            6,
+        )
+        session.game.whale_orders += 1
+
+    def _refresh_game_score_locked(self, session: LiveSessionState) -> None:
+        pnl_executed = _calculate_executed_pnl(session)
+        session.game.score_breakdown = {
+            "pnl_score": round(pnl_executed, 6),
+            "impact_score": round(session.game.total_whale_impact_bps * 10, 6),
+            "volume_score": round(session.game.total_whale_volume * 0.01, 6),
+        }
+        session.game.score = round(sum(session.game.score_breakdown.values()), 6)
+
+    def _end_game_locked(self, session: LiveSessionState) -> None:
+        if session.game.status == "idle":
+            return
+        if session.game.status == "ended":
+            return
+
+        self._refresh_game_score_locked(session)
+        starting_price = session.game.starting_price or session.config.initial_price
+        session.game.final_result = GameFinalResult(
+            score=round(session.game.score, 6),
+            pnl_executed=round(_calculate_executed_pnl(session), 6),
+            max_impact_bps=round(session.game.max_whale_impact_bps, 6),
+            total_volume=round(session.game.total_whale_volume, 6),
+            whale_orders=session.game.whale_orders,
+            ending_price=round(session.last_price, 4),
+            starting_price=round(starting_price, 4),
+        )
+        session.game.status = "ended"
+        session.updated_at = _utc_now()
 
 
 def _cooldown_for(strategy: StrategyType) -> int:
@@ -826,6 +977,23 @@ def _resolve_post_trade_price(
         return round(fill_price, 4)
 
     return round(fallback_price, 4)
+
+
+def _empty_game_score_breakdown() -> dict[str, float]:
+    return {
+        "pnl_score": 0.0,
+        "impact_score": 0.0,
+        "volume_score": 0.0,
+    }
+
+
+def _calculate_executed_pnl(session: LiveSessionState) -> float:
+    whale_balance = session.whale_ledger.get_balance(WHALE_AGENT_ID)
+    cash_total = whale_balance.cash_free + whale_balance.cash_reserved
+    asset_total = whale_balance.asset_free + whale_balance.asset_reserved
+    initial_equity = WHALE_INITIAL_CASH + WHALE_INITIAL_ASSET * session.config.initial_price
+
+    return cash_total + asset_total * session.config.initial_price - initial_equity
 
 
 def _preloaded_tick_count(tick_interval_ms: int) -> int:

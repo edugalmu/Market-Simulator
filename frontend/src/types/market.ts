@@ -99,6 +99,33 @@ export type LiveWhaleOrderOutcome = {
   remaining_side_depth: number
 }
 
+export type GameScoreBreakdown = {
+  pnl_score: number
+  impact_score: number
+  volume_score: number
+}
+
+export type GameFinalResult = {
+  score: number
+  pnl_executed: number
+  max_impact_bps: number
+  total_volume: number
+  whale_orders: number
+  ending_price: number
+  starting_price: number
+}
+
+export type LiveGameState = {
+  mode: 'whale_challenge' | null
+  status: 'idle' | 'running' | 'ended'
+  started_at_tick: number | null
+  duration_ticks: number
+  remaining_ticks: number
+  score: number
+  score_breakdown: GameScoreBreakdown
+  final_result: GameFinalResult | null
+}
+
 export type LiveSimulationSnapshot = {
   session_id: string
   status: 'running' | 'stopped'
@@ -115,6 +142,7 @@ export type LiveSimulationSnapshot = {
   last_tick: TickReport | null
   whale_balance: WhaleBalanceSnapshot
   last_whale_order: LiveWhaleOrderOutcome | null
+  game: LiveGameState
   notes: string[]
 }
 

@@ -14,6 +14,7 @@ Implementado y verificable en el repositorio:
 - Bootstrap deterministico de 1,000 agentes por defecto.
 - Sesion viva minima en memoria con ticks automaticos y controles de iniciar, detener, avanzar y operar como ballena.
 - Grafica principal con OHLCV real por tick desde backend en la UI, con agrupacion visual 1s/5s/10s/30s/1 min, ventana reciente limitada para no saturar la vista y fallback local si aun faltan barras suficientes.
+- Primer minijuego local `Whale Challenge - 60 segundos` con score, contador, resumen final y reinicio sobre la misma sesion viva.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.
@@ -108,9 +109,10 @@ Rutas utiles:
 - Bootstrap: `http://127.0.0.1:8000/api/v1/simulation/bootstrap`
 - Whale preview: `http://127.0.0.1:8000/api/v1/simulation/whale-shock/preview`
 - Live session: `http://127.0.0.1:8000/api/v1/simulation/live`
+- Live game start: `http://127.0.0.1:8000/api/v1/simulation/live/game/start`
 - Live whale order: `http://127.0.0.1:8000/api/v1/simulation/live/whale-order`
 
-Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual y ver el efecto en la grafica principal basada en `ohlcv_history`, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente y ajustar la velocidad entre normal, rapido y muy rapido.
+Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente, ajustar la velocidad entre normal, rapido y muy rapido y jugar un reto corto `Whale Challenge - 60 segundos` con score y resumen final.
 
 ## Tests y checks
 

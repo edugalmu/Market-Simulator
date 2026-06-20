@@ -40,6 +40,9 @@ function App() {
     liveSession,
     startLiveSession,
     playLiveSession,
+    startLiveGame,
+    endLiveGame,
+    resetLiveGame,
     stopLiveSession,
     stepLiveSession,
     executeWhaleOrder,
@@ -80,6 +83,13 @@ function App() {
   const executedPnl = whaleBalance && whaleCashTotal !== null && whaleTokenTotal !== null
     ? whaleCashTotal + whaleTokenTotal * initialPrice - initialWhaleEquity
     : null
+  const game = liveSession?.game ?? null
+  const finalGameResult = game?.final_result ?? null
+  const challengeStatusLabel = game?.status === 'running'
+    ? 'En marcha'
+    : game?.status === 'ended'
+      ? 'Terminado'
+      : 'Esperando'
 
   const architecturePillars = [
     'Backend FastAPI desacoplado de la UI',
@@ -126,6 +136,14 @@ function App() {
     }
 
     void playLiveSession(nextInterval)
+  }
+
+  function handleStartChallenge() {
+    if (!liveSession) {
+      return
+    }
+
+    void startLiveGame(60)
   }
 
   return (
@@ -318,6 +336,102 @@ function App() {
             tickIntervalMs={tickIntervalMs}
             referenceTimeMs={referenceTimeMs}
           />
+
+          <section className="challenge-card" aria-label="Whale Challenge">
+            <div className="challenge-card__header">
+              <div className="challenge-card__copy">
+                <p className="challenge-card__eyebrow">Whale Challenge</p>
+                <h3 className="challenge-card__title">60 segundos</h3>
+                <p className="challenge-card__objective">
+                  Objetivo: mueve el mercado y maximiza el P&amp;L ejecutado sin quedarte sin liquidez.
+                </p>
+              </div>
+              <span className={`challenge-status challenge-status--${game?.status ?? 'idle'}`}>
+                {challengeStatusLabel}
+              </span>
+            </div>
+
+            <div className="challenge-card__stats">
+              <div className="challenge-stat">
+                <span>Tiempo</span>
+                <strong>{game ? `${game.remaining_ticks}s` : '60s'}</strong>
+              </div>
+              <div className="challenge-stat">
+                <span>Score</span>
+                <strong>{formatGameScore(game?.score ?? 0)}</strong>
+              </div>
+              <div className="challenge-stat">
+                <span>Estado</span>
+                <strong>{challengeStatusLabel}</strong>
+              </div>
+            </div>
+
+            <div className="challenge-breakdown">
+              <span>P&amp;L score {formatGameScore(game?.score_breakdown.pnl_score ?? 0)}</span>
+              <span>Impacto {formatGameScore(game?.score_breakdown.impact_score ?? 0)}</span>
+              <span>Volumen {formatGameScore(game?.score_breakdown.volume_score ?? 0)}</span>
+            </div>
+
+            <div className="challenge-card__actions">
+              {game?.status === 'running' ? (
+                <button
+                  className="control-button control-button--secondary"
+                  onClick={() => void endLiveGame()}
+                  disabled={actionLoading || !liveSession}
+                  type="button"
+                >
+                  Terminar reto
+                </button>
+              ) : (
+                <button
+                  className="control-button"
+                  onClick={handleStartChallenge}
+                  disabled={actionLoading || !liveSession}
+                  type="button"
+                >
+                  {game?.status === 'ended' ? 'Reintentar reto' : 'Iniciar reto 60s'}
+                </button>
+              )}
+
+              <button
+                className="control-button control-button--secondary"
+                onClick={() => void resetLiveGame()}
+                disabled={actionLoading || !liveSession || game?.status === 'idle'}
+                type="button"
+              >
+                Reiniciar reto
+              </button>
+            </div>
+
+            {finalGameResult ? (
+              <div className="challenge-result">
+                <div className="challenge-result__item">
+                  <span>Resultado final</span>
+                  <strong>{formatGameScore(finalGameResult.score)}</strong>
+                </div>
+                <div className="challenge-result__item">
+                  <span>P&amp;L ejecutado</span>
+                  <strong>{formatSignedCurrency(finalGameResult.pnl_executed)}</strong>
+                </div>
+                <div className="challenge-result__item">
+                  <span>Maximo impacto</span>
+                  <strong>{finalGameResult.max_impact_bps.toFixed(2)} bps</strong>
+                </div>
+                <div className="challenge-result__item">
+                  <span>Volumen ballena</span>
+                  <strong>{formatGameScore(finalGameResult.total_volume)}</strong>
+                </div>
+                <div className="challenge-result__item">
+                  <span>Ordenes ejecutadas</span>
+                  <strong>{finalGameResult.whale_orders}</strong>
+                </div>
+                <div className="challenge-result__item">
+                  <span>Precio final</span>
+                  <strong>${finalGameResult.ending_price.toFixed(2)}</strong>
+                </div>
+              </div>
+            ) : null}
+          </section>
         </div>
       </section>
 
@@ -744,6 +858,13 @@ function formatTimeframeOptionLabel(timeframe: TimeframeSeconds) {
   }
 
   return `${timeframe}s`
+}
+
+function formatGameScore(value: number) {
+  return value.toLocaleString('es-ES', {
+    minimumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })
 }
 
 function formatQuantity(value: number | null, digits: number) {
