@@ -276,7 +276,6 @@ export function PriceChart({
             </>
           ) : null}
 
-          <circle className="price-chart__last-point" cx={currentMarker.x} cy={currentMarker.y} r="6" />
           <line
             className="price-chart__current-line"
             x1={currentMarker.x}

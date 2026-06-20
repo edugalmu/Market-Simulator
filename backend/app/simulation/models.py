@@ -19,6 +19,13 @@ class AgentMixEntry(BaseModel):
     count: int
 
 
+class TopAgentEntry(BaseModel):
+    agent_id: int
+    alias: str
+    strategy: str
+    equity: float
+
+
 class OrderBookLevel(BaseModel):
     price: float
     quantity: float
@@ -39,6 +46,7 @@ class OrderBookSnapshot(BaseModel):
 class MarketMetrics(BaseModel):
     market_cap: float
     average_agent_equity: float
+    total_agent_equity: float
     total_asset_inventory: float
     active_compute_backend: str
 
@@ -87,6 +95,10 @@ class WhaleBalanceSnapshot(BaseModel):
     cash_reserved: float
     asset_free: float
     asset_reserved: float
+    initial_cash: float
+    initial_asset: float
+    initial_mark_price: float
+    initial_total_equity: float
     total_equity: float
 
 
@@ -143,6 +155,7 @@ class LiveSimulationSnapshot(BaseModel):
     status: Literal["running", "stopped"]
     tick: int
     tick_interval_ms: int
+    simulated_tick_interval_ms: int
     created_at: str
     updated_at: str
     config: SessionConfig
@@ -154,6 +167,7 @@ class LiveSimulationSnapshot(BaseModel):
     last_tick: TickReport | None = None
     whale_balance: WhaleBalanceSnapshot
     last_whale_order: LiveWhaleOrderOutcome | None = None
+    top_agents: list[TopAgentEntry] = Field(default_factory=list)
     game: LiveGameState = Field(default_factory=LiveGameState)
     notes: list[str] = Field(default_factory=list)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from math import pi, sin
 from random import Random
 from threading import Event, Lock, Thread, current_thread
 from uuid import uuid4
@@ -25,19 +26,30 @@ from app.simulation.models import (
     OhlcvBar,
     SessionConfig,
     TickReport,
+    TopAgentEntry,
     WhaleBalanceSnapshot,
 )
 from app.simulation.scheduler import select_active_agent_count
 
 
 DEFAULT_TICK_INTERVAL_MS = 750
+SIMULATED_TICK_INTERVAL_MS = 1000
 MAX_PRICE_HISTORY = 24
 MAX_OHLCV_HISTORY = 80
 PRELOADED_WINDOW_MS = 10 * 60 * 1000
 PRELOADED_HISTORY_MARGIN = 12
+RIVAL_WHALE_COUNT = 9
+RIVAL_WHALE_SHARE_PER_WHALE = 0.02
+RIVAL_WHALE_CASH_WEIGHT = 0.50
+RIVAL_WHALE_LEVERAGE_MIN = 1.4
+RIVAL_WHALE_LEVERAGE_MAX = 3.2
+MONEY_GROWTH_INTERVAL_TICKS = 60
+MONEY_GROWTH_MULTIPLIER = 1.03
+TEN_MINUTE_SENTIMENT_INTERVAL_TICKS = 10 * 60
+ONE_MINUTE_SENTIMENT_INTERVAL_TICKS = 60
 WHALE_AGENT_ID = 0
-WHALE_INITIAL_CASH = 250_000.0
-WHALE_INITIAL_ASSET = 5_000.0
+WHALE_TARGET_CAPITAL_SHARE = 0.20
+WHALE_CASH_WEIGHT = 0.50
 SHOCK_BIAS_DECAY = 0.72
 MAX_SHOCK_BIAS_BPS = 85.0
 WHALE_CHALLENGE_MODE = "whale_challenge"
@@ -54,6 +66,32 @@ class AgentRuntimeState:
     aggression_level: float
     cooldown_ticks: int
     last_action_tick: int = -10_000
+    directional_side: int = 0
+    directional_ticks_remaining: int = 0
+
+
+@dataclass(slots=True)
+class RivalWhaleState:
+    whale_id: int
+    alias: str
+    cash: float
+    asset: float
+    leverage_limit: float
+    aggression: float
+    cooldown_ticks: int
+    last_action_tick: int = -10_000
+
+    def total_equity(self, mark_price: float) -> float:
+        return self.cash + self.asset * mark_price
+
+
+@dataclass(slots=True)
+class WhaleMoodState:
+    session_score: float
+    ten_minute_score: float
+    minute_score: float
+    next_ten_minute_roll_tick: int
+    next_minute_roll_tick: int
 
 
 @dataclass(slots=True)
@@ -93,6 +131,15 @@ class LiveSessionState:
     tick_interval_ms: int
     running: bool
     last_price: float
+    whale_initial_cash: float
+    whale_initial_asset: float
+    whale_initial_mark_price: float
+    whale_initial_total_equity: float
+    preloaded_ticks_total: int
+    preload_pattern: str
+    rival_whales: list[RivalWhaleState]
+    whale_mood: WhaleMoodState
+    next_cash_growth_tick: int
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
     tick: int = 0
@@ -133,18 +180,33 @@ class LiveSimulationService:
         active_backend, profiles, ledger, order_book = engine.build_market_state(config)
         order_book.ensure_depth_around(config.initial_price, base_quantity=8.0)
         rng = Random(config.seed)
+        whale_initial_cash, whale_initial_asset = _build_whale_initial_portfolio(
+            config,
+            reference_price=config.initial_price,
+        )
+        whale_initial_total_equity = round(
+            whale_initial_cash + whale_initial_asset * config.initial_price,
+            6,
+        )
+        rival_whales = _build_rival_whales(
+            total_agent_equity=ledger.total_equity(config.initial_price),
+            reference_price=config.initial_price,
+            rng=rng,
+        )
+        whale_mood = _build_whale_mood_state(rng, current_tick=0)
         whale_ledger = Ledger(
             {
                 WHALE_AGENT_ID: AgentBalance(
-                    cash_free=WHALE_INITIAL_CASH,
+                    cash_free=whale_initial_cash,
                     cash_reserved=0.0,
-                    asset_free=WHALE_INITIAL_ASSET,
+                    asset_free=whale_initial_asset,
                     asset_reserved=0.0,
                 )
             }
         )
-        history_size = _history_size_for(tick_interval_ms)
-        preloaded_tick_count = _preloaded_tick_count(tick_interval_ms)
+        history_size = _history_size_for()
+        preloaded_tick_count = _preloaded_tick_count()
+        preload_pattern = _choose_preload_pattern(rng)
 
         session = LiveSessionState(
             session_id=f"live-{config.seed}-{uuid4().hex[:8]}",
@@ -159,6 +221,15 @@ class LiveSimulationService:
             tick_interval_ms=tick_interval_ms,
             running=auto_run,
             last_price=order_book.mid_price or config.initial_price,
+            whale_initial_cash=whale_initial_cash,
+            whale_initial_asset=whale_initial_asset,
+            whale_initial_mark_price=config.initial_price,
+            whale_initial_total_equity=whale_initial_total_equity,
+            preloaded_ticks_total=preloaded_tick_count,
+            preload_pattern=preload_pattern,
+            rival_whales=rival_whales,
+            whale_mood=whale_mood,
+            next_cash_growth_tick=MONEY_GROWTH_INTERVAL_TICKS,
             price_history=deque([order_book.mid_price or config.initial_price], maxlen=history_size),
             ohlcv_history=deque(maxlen=history_size),
             runtime_state={
@@ -179,6 +250,7 @@ class LiveSimulationService:
             self._session = session
             for _ in range(preloaded_tick_count):
                 self._advance_session_locked(session)
+            self._reset_whale_baseline_locked(session)
 
         if auto_run:
             thread = Thread(
@@ -388,6 +460,8 @@ class LiveSimulationService:
 
     def _advance_session_locked(self, session: LiveSessionState) -> None:
         session.tick += 1
+        self._roll_whale_mood_locked(session)
+        self._apply_cash_growth_locked(session)
         price_before = session.last_price
         short_anchor = sum(session.price_history) / len(session.price_history)
         active_count = select_active_agent_count(
@@ -432,11 +506,27 @@ class LiveSimulationService:
             if result.average_fill_price > 0:
                 observed_prices.append(result.average_fill_price)
 
+        rival_flow = self._execute_rival_whales_locked(
+            session,
+            current_price=price_before,
+        )
+        active_agents += rival_flow[0]
+        buy_orders += rival_flow[1]
+        sell_orders += rival_flow[2]
+        trades_executed += rival_flow[3]
+        matched_notional += rival_flow[4]
+        matched_quantity += rival_flow[5]
+        observed_prices.extend(rival_flow[6])
+        rival_pressure_bps = rival_flow[7]
+
         flow_imbalance = buy_orders - sell_orders
         drift_bps = max(
             min(
                 flow_imbalance * 1.35
                 + session.structural_bias_bps
+                + _preload_pattern_bias_bps(session)
+                + _market_mood_bias_bps(session)
+                + rival_pressure_bps
                 + session.rng.uniform(-0.8, 0.8),
                 16.0,
             ),
@@ -629,6 +719,106 @@ class LiveSimulationService:
             whale_balance=whale_balance,
         )
 
+    def _execute_rival_whales_locked(
+        self,
+        session: LiveSessionState,
+        *,
+        current_price: float,
+    ) -> tuple[int, int, int, int, float, float, list[float], float]:
+        mood_bias = _market_mood_bias(session)
+        active_whales = 0
+        buy_orders = 0
+        sell_orders = 0
+        trades_executed = 0
+        matched_notional = 0.0
+        matched_quantity = 0.0
+        observed_prices: list[float] = []
+        pressure_bps = 0.0
+
+        for whale in session.rival_whales:
+            if session.tick - whale.last_action_tick <= whale.cooldown_ticks:
+                continue
+
+            activation_threshold = min(0.38 + abs(mood_bias) * 0.42 + whale.aggression * 0.08, 0.96)
+            if session.rng.random() > activation_threshold:
+                continue
+
+            side = OrderSide.BUY if session.rng.random() < _market_buy_probability(session, mood_bias) else OrderSide.SELL
+            notional_equity = max(abs(whale.total_equity(current_price)), current_price * 120)
+            leverage_multiplier = 1 + whale.leverage_limit * (0.45 + abs(mood_bias))
+
+            if side == OrderSide.BUY:
+                requested_notional = max(
+                    750.0,
+                    notional_equity * whale.aggression * session.rng.uniform(0.08, 0.18) * leverage_multiplier,
+                )
+                result = execute_market_buy_by_notional(
+                    session.order_book,
+                    notional=requested_notional,
+                    reference_price=current_price,
+                )
+                whale.cash -= result.matched_notional
+                whale.asset += result.quantity_matched
+                buy_orders += 1
+            else:
+                requested_quantity = max(
+                    5.0,
+                    (notional_equity / max(current_price, 1e-9))
+                    * whale.aggression
+                    * session.rng.uniform(0.08, 0.18)
+                    * leverage_multiplier,
+                )
+                result = execute_market_order(
+                    session.order_book,
+                    side=side,
+                    quantity=requested_quantity,
+                )
+                whale.cash += result.matched_notional
+                whale.asset -= result.quantity_matched
+                sell_orders += 1
+
+            whale.last_action_tick = session.tick
+            active_whales += 1
+            trades_executed += result.trades_executed
+            matched_notional += result.matched_notional
+            matched_quantity += result.quantity_matched
+            if result.average_fill_price > 0:
+                observed_prices.append(result.average_fill_price)
+
+            direction_sign = 1 if side == OrderSide.BUY else -1
+            pressure_bps += direction_sign * min(result.matched_notional / 12_500, 8.5) * (0.8 + abs(mood_bias))
+
+        return (
+            active_whales,
+            buy_orders,
+            sell_orders,
+            trades_executed,
+            matched_notional,
+            matched_quantity,
+            observed_prices,
+            pressure_bps,
+        )
+
+    def _roll_whale_mood_locked(self, session: LiveSessionState) -> None:
+        if session.tick >= session.whale_mood.next_ten_minute_roll_tick:
+            session.whale_mood.ten_minute_score = session.rng.randint(0, 100)
+            session.whale_mood.next_ten_minute_roll_tick += TEN_MINUTE_SENTIMENT_INTERVAL_TICKS
+
+        if session.tick >= session.whale_mood.next_minute_roll_tick:
+            session.whale_mood.minute_score = session.rng.randint(0, 100)
+            session.whale_mood.next_minute_roll_tick += ONE_MINUTE_SENTIMENT_INTERVAL_TICKS
+
+    def _apply_cash_growth_locked(self, session: LiveSessionState) -> None:
+        if session.tick < session.next_cash_growth_tick:
+            return
+
+        while session.tick >= session.next_cash_growth_tick:
+            session.ledger.scale_cash(MONEY_GROWTH_MULTIPLIER)
+            for whale in session.rival_whales:
+                whale.cash *= MONEY_GROWTH_MULTIPLIER
+
+            session.next_cash_growth_tick += MONEY_GROWTH_INTERVAL_TICKS
+
     def _execute_profile_action(
         self,
         session: LiveSessionState,
@@ -706,6 +896,7 @@ class LiveSimulationService:
             status="running" if session.running else "stopped",
             tick=session.tick,
             tick_interval_ms=session.tick_interval_ms,
+            simulated_tick_interval_ms=SIMULATED_TICK_INTERVAL_MS,
             created_at=session.created_at,
             updated_at=session.updated_at,
             config=session.config,
@@ -728,6 +919,7 @@ class LiveSimulationService:
             last_tick=session.last_tick,
             whale_balance=self._build_whale_balance_snapshot(session),
             last_whale_order=session.last_whale_order,
+            top_agents=self._build_top_agents(session),
             game=self._build_game_snapshot(session),
             notes=[
                 "Live session runs in memory and advances by tick while the app process stays open.",
@@ -746,6 +938,10 @@ class LiveSimulationService:
             cash_reserved=round(whale_balance.cash_reserved, 6),
             asset_free=round(whale_balance.asset_free, 6),
             asset_reserved=round(whale_balance.asset_reserved, 6),
+            initial_cash=round(session.whale_initial_cash, 6),
+            initial_asset=round(session.whale_initial_asset, 6),
+            initial_mark_price=round(session.whale_initial_mark_price, 6),
+            initial_total_equity=round(session.whale_initial_total_equity, 6),
             total_equity=round(whale_balance.total_equity(session.last_price), 6),
         )
 
@@ -782,6 +978,58 @@ class LiveSimulationService:
                 whale_side=whale_side.value if whale_side is not None else None,
                 whale_impact_bps=whale_impact_bps,
             )
+        )
+
+    def _build_top_agents(self, session: LiveSessionState) -> list[TopAgentEntry]:
+        ranked_profiles = sorted(
+            session.profiles,
+            key=lambda profile: session.ledger.get_balance(profile.agent_id).total_equity(session.last_price),
+            reverse=True,
+        )[:10]
+
+        return [
+            TopAgentEntry(
+                agent_id=profile.agent_id,
+                alias=_build_agent_alias(profile.agent_id),
+                strategy=profile.strategy.value,
+                equity=round(
+                    session.ledger.get_balance(profile.agent_id).total_equity(session.last_price),
+                    2,
+                ),
+            )
+            for profile in ranked_profiles
+        ]
+
+    def _reset_whale_baseline_locked(self, session: LiveSessionState) -> None:
+        current_agent_equity = session.ledger.total_equity(session.last_price)
+        whale_initial_cash, whale_initial_asset = _build_whale_initial_portfolio(
+            session.config,
+            reference_price=session.last_price,
+            total_agent_equity=current_agent_equity,
+        )
+        session.whale_initial_cash = whale_initial_cash
+        session.whale_initial_asset = whale_initial_asset
+        session.whale_initial_mark_price = session.last_price
+        session.whale_initial_total_equity = round(
+            whale_initial_cash + whale_initial_asset * session.last_price,
+            6,
+        )
+        session.rival_whales = _build_rival_whales(
+            total_agent_equity=current_agent_equity,
+            reference_price=session.last_price,
+            rng=session.rng,
+        )
+        session.whale_mood = _build_whale_mood_state(session.rng, current_tick=session.tick)
+        session.next_cash_growth_tick = session.tick + MONEY_GROWTH_INTERVAL_TICKS
+        session.whale_ledger = Ledger(
+            {
+                WHALE_AGENT_ID: AgentBalance(
+                    cash_free=whale_initial_cash,
+                    cash_reserved=0.0,
+                    asset_free=whale_initial_asset,
+                    asset_reserved=0.0,
+                )
+            }
         )
 
     def _build_game_snapshot(self, session: LiveSessionState) -> LiveGameState:
@@ -861,10 +1109,16 @@ class LiveSimulationService:
 def _cooldown_for(strategy: StrategyType) -> int:
     if strategy == StrategyType.NOISE:
         return 0
-    if strategy in {StrategyType.MOMENTUM, StrategyType.MEAN_REVERSION}:
+    if strategy == StrategyType.MOMENTUM:
         return 1
+    if strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        return 2
     if strategy == StrategyType.MARKET_MAKER:
         return 2
+    if strategy == StrategyType.DIRECTIONAL_FUND:
+        return 3
+    if strategy == StrategyType.AGGRESSIVE_WHALE:
+        return 8
     return 3
 
 
@@ -890,16 +1144,16 @@ def _decide_side(
         return OrderSide.BUY if rng.random() < 0.5 else OrderSide.SELL
 
     if strategy == StrategyType.MOMENTUM:
-        if price_bias > 0.0008:
+        if price_bias > 0.0006:
             return OrderSide.BUY
-        if price_bias < -0.0008:
+        if price_bias < -0.0006:
             return OrderSide.SELL
-        return OrderSide.BUY if rng.random() < 0.52 else OrderSide.SELL
+        return OrderSide.BUY if rng.random() < 0.56 else OrderSide.SELL
 
-    if strategy == StrategyType.MEAN_REVERSION:
-        if price_bias > 0.0012:
+    if strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        if price_bias > 0.0010 or fair_value_gap > 0.0013:
             return OrderSide.SELL
-        if price_bias < -0.0012:
+        if price_bias < -0.0010 or fair_value_gap < -0.0013:
             return OrderSide.BUY
         return None
 
@@ -907,6 +1161,21 @@ def _decide_side(
         if abs(price_bias) < 0.0006:
             return None
         return OrderSide.SELL if price_bias > 0 else OrderSide.BUY
+
+    if strategy == StrategyType.DIRECTIONAL_FUND:
+        if runtime.directional_ticks_remaining <= 0:
+            runtime.directional_ticks_remaining = rng.randint(20, 45)
+            if abs(price_bias) > 0.0004:
+                runtime.directional_side = 1 if price_bias > 0 else -1
+            else:
+                runtime.directional_side = 1 if rng.random() < 0.5 else -1
+
+        runtime.directional_ticks_remaining = max(runtime.directional_ticks_remaining - 1, 0)
+        return OrderSide.BUY if runtime.directional_side >= 0 else OrderSide.SELL
+
+    if strategy == StrategyType.AGGRESSIVE_WHALE:
+        bullish_threshold = 0.44 + max(price_bias, 0) * 120
+        return OrderSide.BUY if rng.random() < bullish_threshold else OrderSide.SELL
 
     if fair_value_gap > 0.0015:
         return OrderSide.SELL
@@ -927,9 +1196,12 @@ def _buy_notional(
 
     base_ratio = {
         StrategyType.NOISE: 0.0007,
-        StrategyType.MOMENTUM: 0.0011,
+        StrategyType.MOMENTUM: 0.0016,
         StrategyType.MEAN_REVERSION: 0.0009,
+        StrategyType.VALUE: 0.0010,
         StrategyType.MARKET_MAKER: 0.0005,
+        StrategyType.DIRECTIONAL_FUND: 0.0034,
+        StrategyType.AGGRESSIVE_WHALE: 0.0055,
         StrategyType.FUNDAMENTAL: 0.0010,
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.75, 1.25)
@@ -948,9 +1220,12 @@ def _sell_quantity(
 
     base_ratio = {
         StrategyType.NOISE: 0.08,
-        StrategyType.MOMENTUM: 0.10,
+        StrategyType.MOMENTUM: 0.12,
         StrategyType.MEAN_REVERSION: 0.09,
+        StrategyType.VALUE: 0.08,
         StrategyType.MARKET_MAKER: 0.05,
+        StrategyType.DIRECTIONAL_FUND: 0.14,
+        StrategyType.AGGRESSIVE_WHALE: 0.18,
         StrategyType.FUNDAMENTAL: 0.10,
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.7, 1.2)
@@ -979,6 +1254,82 @@ def _resolve_post_trade_price(
     return round(fallback_price, 4)
 
 
+def _choose_preload_pattern(rng: Random) -> str:
+    return rng.choice(["bullish", "bearish", "lateral", "mixed"])
+
+
+def _build_agent_alias(agent_id: int) -> str:
+    prefixes = [
+        "Atlas",
+        "Nova",
+        "Vector",
+        "Apex",
+        "Helix",
+        "Falcon",
+        "Orion",
+        "Titan",
+        "Meridian",
+        "Pulse",
+    ]
+    suffixes = [
+        "Capital",
+        "Flow",
+        "Dynamics",
+        "Partners",
+        "Desk",
+        "Signal",
+        "Liquidity",
+        "Point",
+        "Labs",
+        "Holdings",
+    ]
+
+    return f"{prefixes[agent_id % len(prefixes)]} {suffixes[(agent_id * 3) % len(suffixes)]}"
+
+
+def _preload_pattern_bias_bps(session: LiveSessionState) -> float:
+    if session.tick > session.preloaded_ticks_total:
+        return 0.0
+
+    progress = session.tick / max(session.preloaded_ticks_total, 1)
+    oscillation = sin(progress * pi * 6)
+
+    if session.preload_pattern == "bullish":
+        return 0.95 + oscillation * 0.55
+
+    if session.preload_pattern == "bearish":
+        return -0.95 + oscillation * 0.55
+
+    if session.preload_pattern == "lateral":
+        return oscillation * 1.15
+
+    if progress < 0.25:
+        return 0.85 + oscillation * 0.45
+    if progress < 0.5:
+        return oscillation * 0.95
+    if progress < 0.75:
+        return -1.05 + oscillation * 0.5
+    return 0.65 + oscillation * 0.65
+
+
+def _build_whale_initial_portfolio(
+    config: SessionConfig,
+    *,
+    reference_price: float,
+    total_agent_equity: float | None = None,
+) -> tuple[float, float]:
+    total_agent_equity = total_agent_equity or config.agent_count * (
+        config.initial_cash + config.initial_asset * config.initial_price
+    )
+    whale_initial_equity = total_agent_equity * (
+        WHALE_TARGET_CAPITAL_SHARE / (1 - WHALE_TARGET_CAPITAL_SHARE)
+    )
+    whale_initial_cash = whale_initial_equity * WHALE_CASH_WEIGHT
+    whale_initial_asset = (whale_initial_equity - whale_initial_cash) / max(reference_price, 1e-9)
+
+    return round(whale_initial_cash, 6), round(whale_initial_asset, 6)
+
+
 def _empty_game_score_breakdown() -> dict[str, float]:
     return {
         "pnl_score": 0.0,
@@ -991,18 +1342,70 @@ def _calculate_executed_pnl(session: LiveSessionState) -> float:
     whale_balance = session.whale_ledger.get_balance(WHALE_AGENT_ID)
     cash_total = whale_balance.cash_free + whale_balance.cash_reserved
     asset_total = whale_balance.asset_free + whale_balance.asset_reserved
-    initial_equity = WHALE_INITIAL_CASH + WHALE_INITIAL_ASSET * session.config.initial_price
+    initial_equity = session.whale_initial_total_equity
 
-    return cash_total + asset_total * session.config.initial_price - initial_equity
-
-
-def _preloaded_tick_count(tick_interval_ms: int) -> int:
-    safe_interval = max(tick_interval_ms, 1)
-    return max((PRELOADED_WINDOW_MS + safe_interval - 1) // safe_interval, 1)
+    return cash_total + asset_total * session.whale_initial_mark_price - initial_equity
 
 
-def _history_size_for(tick_interval_ms: int) -> int:
-    return max(_preloaded_tick_count(tick_interval_ms) + PRELOADED_HISTORY_MARGIN, MAX_OHLCV_HISTORY)
+def _build_rival_whales(
+    *,
+    total_agent_equity: float,
+    reference_price: float,
+    rng: Random,
+) -> list[RivalWhaleState]:
+    rival_equity = total_agent_equity * RIVAL_WHALE_SHARE_PER_WHALE
+    rival_cash = rival_equity * RIVAL_WHALE_CASH_WEIGHT
+    rival_asset = (rival_equity - rival_cash) / max(reference_price, 1e-9)
+
+    return [
+        RivalWhaleState(
+            whale_id=index + 1,
+            alias=_build_agent_alias(10_000 + index),
+            cash=round(rival_cash, 6),
+            asset=round(rival_asset, 6),
+            leverage_limit=round(rng.uniform(RIVAL_WHALE_LEVERAGE_MIN, RIVAL_WHALE_LEVERAGE_MAX), 3),
+            aggression=round(rng.uniform(1.1, 1.8), 3),
+            cooldown_ticks=rng.randint(2, 6),
+        )
+        for index in range(RIVAL_WHALE_COUNT)
+    ]
+
+
+def _build_whale_mood_state(rng: Random, *, current_tick: int) -> WhaleMoodState:
+    return WhaleMoodState(
+        session_score=rng.randint(0, 100),
+        ten_minute_score=rng.randint(0, 100),
+        minute_score=rng.randint(0, 100),
+        next_ten_minute_roll_tick=current_tick + TEN_MINUTE_SENTIMENT_INTERVAL_TICKS,
+        next_minute_roll_tick=current_tick + ONE_MINUTE_SENTIMENT_INTERVAL_TICKS,
+    )
+
+
+def _market_mood_bias(session: LiveSessionState) -> float:
+    average_score = (
+        session.whale_mood.session_score
+        + session.whale_mood.ten_minute_score
+        + session.whale_mood.minute_score
+    ) / 3
+
+    return (average_score - 50) / 50
+
+
+def _market_mood_bias_bps(session: LiveSessionState) -> float:
+    return round(_market_mood_bias(session) * 6.5, 4)
+
+
+def _market_buy_probability(session: LiveSessionState, mood_bias: float) -> float:
+    probability = 0.5 + mood_bias * 0.34 + session.rng.uniform(-0.08, 0.08)
+    return max(min(probability, 0.94), 0.06)
+
+
+def _preloaded_tick_count() -> int:
+    return max((PRELOADED_WINDOW_MS + SIMULATED_TICK_INTERVAL_MS - 1) // SIMULATED_TICK_INTERVAL_MS, 1)
+
+
+def _history_size_for() -> int:
+    return max(_preloaded_tick_count() + PRELOADED_HISTORY_MARGIN, MAX_OHLCV_HISTORY)
 
 
 def _decay_bias(value: float) -> float:

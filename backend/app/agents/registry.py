@@ -6,11 +6,12 @@ from app.agents.base import AgentProfile, StrategyType
 
 
 DEFAULT_AGENT_MIX: tuple[tuple[StrategyType, float], ...] = (
-    (StrategyType.NOISE, 0.45),
+    (StrategyType.NOISE, 0.35),
     (StrategyType.MOMENTUM, 0.20),
-    (StrategyType.MEAN_REVERSION, 0.15),
-    (StrategyType.MARKET_MAKER, 0.12),
-    (StrategyType.FUNDAMENTAL, 0.08),
+    (StrategyType.VALUE, 0.15),
+    (StrategyType.MARKET_MAKER, 0.15),
+    (StrategyType.DIRECTIONAL_FUND, 0.10),
+    (StrategyType.AGGRESSIVE_WHALE, 0.05),
 )
 
 

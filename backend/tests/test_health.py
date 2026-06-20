@@ -115,7 +115,8 @@ def test_live_game_endpoints() -> None:
         json={"side": "buy", "notional": 3000},
     )
     assert whale_response.status_code == 200
-    assert whale_response.json()["snapshot"]["game"]["score"] > 0
+    assert whale_response.json()["snapshot"]["game"]["score"] != 0
+    assert whale_response.json()["snapshot"]["game"]["score_breakdown"]["impact_score"] > 0
 
     end_response = client.post("/api/v1/simulation/live/game/end")
     assert end_response.status_code == 200

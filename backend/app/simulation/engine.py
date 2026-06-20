@@ -96,6 +96,12 @@ class SimulationEngine:
             cash_free=notional if side == OrderSide.BUY else 0.0,
             asset_free=requested_quantity if side == OrderSide.SELL else 0.0,
         )
+        whale_initial_cash = round(notional if side == OrderSide.BUY else 0.0, 6)
+        whale_initial_asset = round(requested_quantity if side == OrderSide.SELL else 0.0, 6)
+        whale_initial_total_equity = round(
+            whale_initial_cash + whale_initial_asset * reference_price,
+            6,
+        )
 
         if side == OrderSide.BUY:
             ledger.reserve_cash(WHALE_AGENT_ID, notional)
@@ -178,6 +184,10 @@ class SimulationEngine:
                 cash_reserved=round(whale_balance.cash_reserved, 6),
                 asset_free=round(whale_balance.asset_free, 6),
                 asset_reserved=round(whale_balance.asset_reserved, 6),
+                initial_cash=whale_initial_cash,
+                initial_asset=whale_initial_asset,
+                initial_mark_price=reference_price,
+                initial_total_equity=whale_initial_total_equity,
                 total_equity=round(whale_balance.total_equity(book_after.mid_price), 6),
             ),
             notes=notes,
@@ -252,6 +262,7 @@ class SimulationEngine:
                 total_asset_inventory=total_asset_inventory,
             ),
             average_agent_equity=round(ledger.average_equity(mark_price), 2),
+            total_agent_equity=round(ledger.total_equity(mark_price), 2),
             total_asset_inventory=round(total_asset_inventory, 4),
             active_compute_backend=active_backend,
         )

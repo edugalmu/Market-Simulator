@@ -12,8 +12,7 @@ type SimulationSpeed = 'normal' | 'fast' | 'very-fast'
 
 const TIMEFRAME_OPTIONS: TimeframeSeconds[] = [1, 5, 10, 30, 60]
 const PRELOADED_WINDOW_SECONDS = 10 * 60
-const WHALE_INITIAL_CASH = 250_000
-const WHALE_INITIAL_ASSET = 5_000
+const DEFAULT_SIMULATED_TICK_INTERVAL_MS = 1000
 const SPEED_TO_INTERVAL_MS: Record<SimulationSpeed, number> = {
   normal: 750,
   fast: 250,
@@ -29,8 +28,6 @@ const VISIBLE_BAR_TARGETS: Record<TimeframeSeconds, number> = {
 
 function App() {
   const {
-    loading,
-    liveLoading,
     actionLoading,
     error,
     liveError,
@@ -65,25 +62,37 @@ function App() {
   const whaleBalance = liveSession?.whale_balance ?? null
   const rawOhlcvHistory = liveSession?.ohlcv_history ?? []
   const configuredTickIntervalMs = SPEED_TO_INTERVAL_MS[selectedSpeed]
-  const tickIntervalMs = liveSession?.tick_interval_ms ?? configuredTickIntervalMs
+  const simulatedTickIntervalMs = liveSession?.simulated_tick_interval_ms ?? DEFAULT_SIMULATED_TICK_INTERVAL_MS
   const referenceTimeMs = getReferenceTimeMs(liveSession?.updated_at)
   const visibleBarCount = VISIBLE_BAR_TARGETS[selectedTimeframe]
-  const visiblePriceSampleCount = Math.ceil((PRELOADED_WINDOW_SECONDS * 1000) / tickIntervalMs) + 1
+  const visiblePriceSampleCount = Math.ceil((PRELOADED_WINDOW_SECONDS * 1000) / simulatedTickIntervalMs) + 1
   const chartPrices = (liveSession?.recent_mid_prices ?? []).slice(-visiblePriceSampleCount)
-  const chartBars = aggregateOhlcvBars(rawOhlcvHistory, selectedTimeframe, tickIntervalMs).slice(-visibleBarCount)
-  const fallbackBars = buildGroupedPriceBars(chartPrices, liveSession?.tick ?? 0, selectedTimeframe, tickIntervalMs).slice(-visibleBarCount)
+  const chartBars = aggregateOhlcvBars(rawOhlcvHistory, selectedTimeframe, simulatedTickIntervalMs).slice(-visibleBarCount)
+  const fallbackBars = buildGroupedPriceBars(chartPrices, liveSession?.tick ?? 0, selectedTimeframe, simulatedTickIntervalMs).slice(-visibleBarCount)
   const activeChartBars = chartBars.length > 0 ? chartBars : fallbackBars
   const whaleCashTotal = whaleBalance ? whaleBalance.cash_free + whaleBalance.cash_reserved : null
   const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
   const liveOrderBook = liveSession?.order_book ?? null
-  const initialPrice = liveSession?.config.initial_price ?? summary?.config.initial_price ?? 100
-  const initialWhaleEquity = WHALE_INITIAL_CASH + WHALE_INITIAL_ASSET * initialPrice
+  const topAgents = liveSession?.top_agents ?? []
+  const totalAgentEquity = liveSession?.metrics.total_agent_equity ?? null
+  const initialWhaleEquity = whaleBalance?.initial_total_equity ?? null
   const estimatedPnl = whaleBalance
+    && initialWhaleEquity !== null
     ? whaleBalance.total_equity - initialWhaleEquity
     : null
   const executedPnl = whaleBalance && whaleCashTotal !== null && whaleTokenTotal !== null
-    ? whaleCashTotal + whaleTokenTotal * initialPrice - initialWhaleEquity
+    && initialWhaleEquity !== null
+    ? whaleCashTotal + whaleTokenTotal * whaleBalance.initial_mark_price - initialWhaleEquity
     : null
+  const totalVisibleCapital = totalAgentEquity !== null && whaleBalance
+    ? totalAgentEquity + whaleBalance.total_equity
+    : null
+  const whaleCapitalShare = totalVisibleCapital && whaleBalance
+    ? (whaleBalance.total_equity / totalVisibleCapital) * 100
+    : 0
+  const capitalDonutStyle = {
+    backgroundImage: `conic-gradient(#ec8a20 0 ${whaleCapitalShare}%, rgba(140, 226, 212, 0.9) ${whaleCapitalShare}% 100%)`,
+  }
   const game = liveSession?.game ?? null
   const finalGameResult = game?.final_result ?? null
   const challengeStatusLabel = game?.status === 'running'
@@ -104,14 +113,6 @@ function App() {
     'Reemplazar market orders sinteticas por un matching continuo mas rico.',
     'Emitir snapshots por streaming para evitar polling desde la UI.',
   ]
-
-  const liveStatus = liveSession?.status === 'running'
-    ? 'Simulacion en marcha'
-    : liveSession?.status === 'stopped'
-      ? 'Simulacion detenida'
-      : liveLoading
-        ? 'Iniciando simulacion'
-        : 'Sin sesion viva'
 
   const whaleImpactTone = lastWhaleOrder?.side === 'buy'
     ? 'impact-chip impact-chip--buy'
@@ -153,19 +154,13 @@ function App() {
         <div className="hero-spotlight">
           <div className="hero-spotlight__header">
             <p className="eyebrow">Mercado en vivo</p>
-            <div className="hero-spotlight__badges">
-              <span className="status-pill">{loading ? 'Cargando backend' : liveStatus}</span>
-              <span className="status-pill status-pill--accent">
-                {health?.gpu_enabled ? 'GPU habilitada' : 'CPU por defecto'}
-              </span>
-            </div>
-          </div>
-
-          <div className="hero-highlights hero-highlights--compact hero-highlights--minimal">
-            <div className="hero-stat">
-              <span>Precio</span>
-              <strong>{liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : '--'}</strong>
-            </div>
+            <button
+              className={`mode-toggle mode-toggle--hero${isDevMode ? ' mode-toggle--active' : ''}`}
+              onClick={() => setIsDevMode((current) => !current)}
+              type="button"
+            >
+              Modo DEV
+            </button>
           </div>
 
           <div className="market-toolbar">
@@ -208,16 +203,8 @@ function App() {
                   ))}
                 </div>
 
-                <div className="simulation-box__footer">
-                  <button
-                    className={`mode-toggle${isDevMode ? ' mode-toggle--active' : ''}`}
-                    onClick={() => setIsDevMode((current) => !current)}
-                    type="button"
-                  >
-                    Modo DEV
-                  </button>
-
-                  {isDevMode ? (
+                {isDevMode ? (
+                  <div className="simulation-box__footer">
                     <button
                       className="control-button control-button--step"
                       onClick={() => void stepLiveSession(5)}
@@ -225,8 +212,8 @@ function App() {
                     >
                       Avanzar 5 ticks
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="timeframe-selector timeframe-selector--market" role="group" aria-label="Selector de marco temporal de velas">
@@ -267,10 +254,15 @@ function App() {
                       onClick={() => setWhaleNotionalInput(String(preset))}
                       type="button"
                     >
-                      {preset.toLocaleString('es-ES')}
+                      {preset.toLocaleString('en-US')}
                     </button>
                   )
                 })}
+              </div>
+
+              <div className="market-price-card">
+                <span>Precio</span>
+                <strong>{liveSession ? formatCurrency(liveSession.order_book.mid_price) : '--'}</strong>
               </div>
 
               {isDevMode ? (
@@ -327,14 +319,51 @@ function App() {
               <span>Dolares</span>
               <strong className="position-pill__value">{formatCurrency(whaleCashTotal)}</strong>
             </div>
+            <div className="position-pill">
+              <span>Mcap jugador</span>
+              <strong className="position-pill__value">{whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}</strong>
+            </div>
           </div>
+
+          <section className="capital-overview-card" aria-label="Capital total del mercado">
+            <div className="capital-overview-card__copy">
+              <p className="challenge-card__eyebrow">Capital total</p>
+              <h3 className="capital-overview-card__title">Reparto visible del mercado</h3>
+              <p className="capital-overview-card__note">
+                Agentes y ballena se reparten el capital total visible. La ballena parte con alrededor del 20%.
+              </p>
+            </div>
+
+            <div className="capital-overview-card__visual">
+              <div className="capital-donut capital-donut--compact" style={capitalDonutStyle}>
+                <div className="capital-donut__center">
+                  <span>Ballena</span>
+                  <strong>{formatPercent(whaleCapitalShare)}</strong>
+                </div>
+              </div>
+              <div className="capital-overview-card__stats">
+                <div className="capital-overview-card__row">
+                  <span>Agentes</span>
+                  <strong>{totalAgentEquity !== null ? formatCurrency(totalAgentEquity) : '--'}</strong>
+                </div>
+                <div className="capital-overview-card__row">
+                  <span>Ballena</span>
+                  <strong>{whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}</strong>
+                </div>
+                <div className="capital-overview-card__row">
+                  <span>Total</span>
+                  <strong>{totalVisibleCapital !== null ? formatCurrency(totalVisibleCapital) : '--'}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <PriceChart
             prices={chartPrices}
             bars={activeChartBars}
             currentTick={liveSession?.tick ?? 0}
             mode="candles"
-            tickIntervalMs={tickIntervalMs}
+            tickIntervalMs={simulatedTickIntervalMs}
             referenceTimeMs={referenceTimeMs}
           />
 
@@ -516,7 +545,7 @@ function App() {
           <MetricCard label="Sesion viva" value={liveSession?.status ?? 'sin sesion'} />
           <MetricCard
             label="Agentes objetivo"
-            value={(liveSession?.config.agent_count ?? summary?.config.agent_count ?? 1000).toLocaleString('es-ES')}
+            value={(liveSession?.config.agent_count ?? summary?.config.agent_count ?? 1000).toLocaleString('en-US')}
           />
           <MetricCard
             label="Precio medio"
@@ -651,9 +680,7 @@ function App() {
               <span>Bid depth antes</span>
               <strong>
                 {whalePreview
-                  ? whalePreview.order_book_before.bid_depth.toLocaleString('es-ES', {
-                      maximumFractionDigits: 4,
-                    })
+                  ? formatBookNumber(whalePreview.order_book_before.bid_depth)
                   : '--'}
               </strong>
             </div>
@@ -661,9 +688,7 @@ function App() {
               <span>Bid depth despues</span>
               <strong>
                 {whalePreview
-                  ? whalePreview.order_book_after.bid_depth.toLocaleString('es-ES', {
-                      maximumFractionDigits: 4,
-                    })
+                  ? formatBookNumber(whalePreview.order_book_after.bid_depth)
                   : '--'}
               </strong>
             </div>
@@ -743,34 +768,34 @@ function App() {
           <div className="mini-grid">
             <MetricCard
               label="Cash libre"
-              value={whaleBalance ? `$${whaleBalance.cash_free.toFixed(2)}` : '--'}
+              value={whaleBalance ? formatCurrency(whaleBalance.cash_free) : '--'}
             />
             <MetricCard
               label="Cash reservado"
-              value={whaleBalance ? `$${whaleBalance.cash_reserved.toFixed(2)}` : '--'}
+              value={whaleBalance ? formatCurrency(whaleBalance.cash_reserved) : '--'}
             />
             <MetricCard
               label="Asset libre"
-              value={whaleBalance ? whaleBalance.asset_free.toFixed(4) : '--'}
+              value={whaleBalance ? formatQuantity(whaleBalance.asset_free, 4) : '--'}
             />
             <MetricCard
               label="Asset reservado"
-              value={whaleBalance ? whaleBalance.asset_reserved.toFixed(4) : '--'}
+              value={whaleBalance ? formatQuantity(whaleBalance.asset_reserved, 4) : '--'}
             />
             <MetricCard
               label="Equity"
-              value={whaleBalance ? `$${whaleBalance.total_equity.toFixed(2)}` : '--'}
+              value={whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}
               tone="accent"
             />
           </div>
         </SectionCard>
 
-        <SectionCard title="Mix inicial de agentes" eyebrow="Modelo operativo">
+        <SectionCard title="Top 10 agentes" eyebrow="Leaderboard dinamico">
           <div className="mix-table">
-            {(liveSession?.agent_mix ?? summary?.agent_mix ?? []).map((entry) => (
-              <div className="mix-row" key={entry.strategy}>
-                <span>{entry.strategy.replace('_', ' ')}</span>
-                <strong>{entry.count.toLocaleString('es-ES')}</strong>
+            {topAgents.map((agent, index) => (
+              <div className="mix-row" key={agent.agent_id}>
+                <span>{`${index + 1}. ${agent.alias} · ${agent.strategy}`}</span>
+                <strong>{formatCurrency(agent.equity)}</strong>
               </div>
             ))}
           </div>
@@ -797,7 +822,7 @@ function aggregateOhlcvBars(bars: OhlcvBar[], timeframeSeconds: number, tickInte
     return []
   }
 
-  const aggregated: ChartBar[] = []
+  const aggregatedGroups: OhlcvBar[][] = []
   let currentBucketKey: number | null = null
   let currentGroup: OhlcvBar[] = []
 
@@ -810,16 +835,17 @@ function aggregateOhlcvBars(bars: OhlcvBar[], timeframeSeconds: number, tickInte
       return
     }
 
-    aggregated.push(buildBackendChartBar(currentGroup))
+    aggregatedGroups.push(currentGroup)
     currentBucketKey = bucketKey
     currentGroup = [bar]
   })
 
   if (currentGroup.length > 0) {
-    aggregated.push(buildBackendChartBar(currentGroup))
+    aggregatedGroups.push(currentGroup)
   }
 
-  return aggregated
+  return trimLeadingPartialGroups(aggregatedGroups, timeframeSeconds, tickIntervalMs)
+    .map((group) => buildBackendChartBar(group))
 }
 
 function buildGroupedPriceBars(prices: number[], currentTick: number, timeframeSeconds: number, tickIntervalMs: number): ChartBar[] {
@@ -828,7 +854,7 @@ function buildGroupedPriceBars(prices: number[], currentTick: number, timeframeS
   }
 
   const startTick = Math.max(currentTick - prices.length + 1, 0)
-  const groupedBars: ChartBar[] = []
+  const groupedBars: Array<Array<{ tick: number, price: number }>> = []
   let currentBucketKey: number | null = null
   let currentGroup: Array<{ tick: number, price: number }> = []
 
@@ -842,16 +868,41 @@ function buildGroupedPriceBars(prices: number[], currentTick: number, timeframeS
       return
     }
 
-    groupedBars.push(buildGroupedChartBar(currentGroup))
+    groupedBars.push(currentGroup)
     currentBucketKey = bucketKey
     currentGroup = [{ tick, price }]
   })
 
   if (currentGroup.length > 0) {
-    groupedBars.push(buildGroupedChartBar(currentGroup))
+    groupedBars.push(currentGroup)
   }
 
-  return groupedBars
+  return trimLeadingPartialGroups(groupedBars, timeframeSeconds, tickIntervalMs)
+    .map((group) => buildGroupedChartBar(group))
+}
+
+function trimLeadingPartialGroups<T extends { tick: number }>(
+  groups: T[][],
+  timeframeSeconds: number,
+  tickIntervalMs: number,
+) {
+  if (groups.length <= 1) {
+    return groups
+  }
+
+  const timeframeMs = Math.max(timeframeSeconds, 1) * 1000
+  const safeTickIntervalMs = Math.max(tickIntervalMs, 1)
+  const expectedTicksPerBar = Math.round(timeframeMs / safeTickIntervalMs)
+  if (expectedTicksPerBar <= 1) {
+    return groups
+  }
+
+  let firstCompleteIndex = 0
+  while (firstCompleteIndex < groups.length - 1 && groups[firstCompleteIndex].length < expectedTicksPerBar) {
+    firstCompleteIndex += 1
+  }
+
+  return groups.slice(firstCompleteIndex)
 }
 
 function buildBackendChartBar(group: OhlcvBar[]): ChartBar {
@@ -902,7 +953,10 @@ function formatCurrency(value: number | null) {
     return '--'
   }
 
-  return `$${value.toFixed(2)}`
+  return `$${value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function formatSignedCurrency(value: number | null) {
@@ -910,12 +964,17 @@ function formatSignedCurrency(value: number | null) {
     return '--'
   }
 
-  const prefix = value > 0 ? '+' : ''
-  return `${prefix}$${value.toFixed(2)}`
+  const normalizedValue = Math.abs(value) < 0.005 ? 0 : value
+
+  const prefix = normalizedValue > 0 ? '+' : ''
+  return `${prefix}$${normalizedValue.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function getPnlClassName(value: number | null) {
-  if (value === null || value === 0) {
+  if (value === null || Math.abs(value) < 0.005) {
     return 'position-pill__value'
   }
 
@@ -933,14 +992,18 @@ function formatTimeframeOptionLabel(timeframe: TimeframeSeconds) {
 }
 
 function formatGameScore(value: number) {
-  return value.toLocaleString('es-ES', {
+  return value.toLocaleString('en-US', {
     minimumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2,
     maximumFractionDigits: 2,
   })
 }
 
+function formatPercent(value: number) {
+  return `${value.toFixed(1)}%`
+}
+
 function formatBookNumber(value: number) {
-  return value.toLocaleString('es-ES', {
+  return value.toLocaleString('en-US', {
     minimumFractionDigits: value >= 100 ? 0 : 2,
     maximumFractionDigits: 2,
   })
@@ -960,7 +1023,10 @@ function formatQuantity(value: number | null, digits: number) {
     return '--'
   }
 
-  return value.toFixed(digits)
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
 }
 
 function getReferenceTimeMs(updatedAt?: string) {

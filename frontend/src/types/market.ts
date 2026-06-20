@@ -24,6 +24,13 @@ export type AgentMixEntry = {
   count: number
 }
 
+export type TopAgentEntry = {
+  agent_id: number
+  alias: string
+  strategy: string
+  equity: number
+}
+
 export type OrderBookLevel = {
   price: number
   quantity: number
@@ -44,6 +51,7 @@ export type OrderBookSnapshot = {
 export type MarketMetrics = {
   market_cap: number
   average_agent_equity: number
+  total_agent_equity: number
   total_asset_inventory: number
   active_compute_backend: string
 }
@@ -132,6 +140,7 @@ export type LiveSimulationSnapshot = {
   status: 'running' | 'stopped'
   tick: number
   tick_interval_ms: number
+  simulated_tick_interval_ms: number
   created_at: string
   updated_at: string
   config: SessionConfig
@@ -143,6 +152,7 @@ export type LiveSimulationSnapshot = {
   last_tick: TickReport | null
   whale_balance: WhaleBalanceSnapshot
   last_whale_order: LiveWhaleOrderOutcome | null
+  top_agents: TopAgentEntry[]
   game: LiveGameState
   notes: string[]
 }
@@ -152,6 +162,10 @@ export type WhaleBalanceSnapshot = {
   cash_reserved: number
   asset_free: number
   asset_reserved: number
+  initial_cash: number
+  initial_asset: number
+  initial_mark_price: number
+  initial_total_equity: number
   total_equity: number
 }
 

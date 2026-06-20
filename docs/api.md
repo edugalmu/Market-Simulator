@@ -199,6 +199,7 @@ Respuesta resumida:
   "status": "running",
   "tick": 1,
   "tick_interval_ms": 750,
+  "simulated_tick_interval_ms": 1000,
   "config": {},
   "order_book": {
     "mid_price": 100.0
@@ -223,6 +224,26 @@ Respuesta resumida:
     "trades_executed": 23,
     "price_change_bps": 0.0,
     "mid_price": 100.0
+  },
+  "whale_balance": {
+    "cash_free": 6265625.0,
+    "cash_reserved": 0.0,
+    "asset_free": 62656.25,
+    "asset_reserved": 0.0,
+    "initial_cash": 6265625.0,
+    "initial_asset": 62656.25,
+    "initial_mark_price": 100.16,
+    "initial_total_equity": 12531250.0,
+    "total_equity": 12531250.0
+  },
+  "top_agents": [
+    {
+      "agent_id": 381,
+      "alias": "Nova Partners",
+      "strategy": "momentum",
+      "equity": 50312.44
+    }
+  ]
   }
 }
 ```
@@ -274,12 +295,16 @@ Campos principales:
 - `status`: `running` o `stopped`.
 - `tick`: tick actual.
 - `tick_interval_ms`: frecuencia objetivo del loop.
+- `simulated_tick_interval_ms`: duracion fija de cada tick en tiempo simulado. La velocidad `x3/x6` acelera el loop real, pero no cambia este marco temporal de las velas.
 - `order_book`: snapshot autoritativo resumido.
 - `order_book.bids` y `order_book.asks`: niveles agregados del libro con `price`, `quantity` y `orders`, pensados para visualizacion DEV y no para exponer cada orden individual.
 - `metrics`: metricas agregadas del mercado.
+- `metrics.total_agent_equity`: equity total agregado del conjunto de agentes, util para paneles de reparto de capital.
 - `recent_mid_prices`: traza compacta de mid-prices recientes para fallback visual.
 - `ohlcv_history`: barras autoritativas por tick con `tick`, `open`, `high`, `low`, `close`, `volume`, `trades` y metadato opcional de ballena.
 - `last_tick`: resumen del ultimo tick ejecutado.
+- `whale_balance.initial_cash`, `initial_asset`, `initial_mark_price` e `initial_total_equity`: baseline inicial de la ballena para P&L y reparto de capital.
+- `top_agents`: ranking resumido de los diez agentes con mayor equity actual, pensado para la UI DEV.
 - `game`: estado del reto local actual con `mode`, `status`, `duration_ticks`, `remaining_ticks`, `score`, `score_breakdown` y `final_result` cuando aplique.
 
 ## POST /api/v1/simulation/live/game/start

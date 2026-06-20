@@ -8,7 +8,10 @@ class StrategyType(str, Enum):
     NOISE = "noise"
     MOMENTUM = "momentum"
     MEAN_REVERSION = "mean_reversion"
+    VALUE = "value"
     MARKET_MAKER = "market_maker"
+    DIRECTIONAL_FUND = "directional_fund"
+    AGGRESSIVE_WHALE = "aggressive_whale"
     FUNDAMENTAL = "fundamental"
 
 

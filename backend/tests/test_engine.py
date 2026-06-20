@@ -4,7 +4,8 @@ from app.simulation.models import SessionConfig
 
 
 def expected_preloaded_ticks(tick_interval_ms: int) -> int:
-    return max(((10 * 60 * 1000) + tick_interval_ms - 1) // tick_interval_ms, 1)
+    _ = tick_interval_ms
+    return 10 * 60
 
 
 def assert_ohlcv_bar_invariants(bar) -> None:
@@ -171,7 +172,8 @@ def test_live_game_challenge_tracks_countdown_score_and_final_result() -> None:
 
     whale_response = service.execute_whale_order(side="buy", notional=3_000.0)
     assert whale_response.snapshot.game.remaining_ticks == 55
-    assert whale_response.snapshot.game.score > 0
+    assert whale_response.snapshot.game.score != 0
+    assert whale_response.snapshot.game.score_breakdown.impact_score > 0
     assert whale_response.snapshot.game.score_breakdown.volume_score > 0
 
     ended = service.end_game()
@@ -201,6 +203,68 @@ def test_live_snapshot_exposes_aggregated_order_book_levels() -> None:
     assert snapshot.order_book.asks[0].price >= snapshot.order_book.best_ask
     assert all(level.orders >= 1 for level in snapshot.order_book.bids)
     assert all(level.orders >= 1 for level in snapshot.order_book.asks)
+
+
+def test_live_session_preload_ticks_do_not_change_with_speed() -> None:
+    fast_snapshot = LiveSimulationService().start(
+        SessionConfig(seed=51),
+        gpu_enabled=False,
+        auto_run=False,
+        tick_interval_ms=125,
+    )
+    slow_service = LiveSimulationService()
+    slow_snapshot = slow_service.start(
+        SessionConfig(seed=52),
+        gpu_enabled=False,
+        auto_run=False,
+        tick_interval_ms=750,
+    )
+    slow_service.reset()
+
+    assert fast_snapshot.tick == 600
+    assert slow_snapshot.tick == 600
+    assert fast_snapshot.simulated_tick_interval_ms == 1000
+    assert slow_snapshot.simulated_tick_interval_ms == 1000
+
+
+def test_live_session_whale_starts_with_one_fifth_of_total_capital() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=61), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    total_capital = snapshot.metrics.total_agent_equity + snapshot.whale_balance.initial_total_equity
+    whale_share = snapshot.whale_balance.initial_total_equity / total_capital
+
+    assert round(whale_share, 2) == 0.20
+
+
+def test_live_session_starts_with_neutral_whale_pnl_after_preload() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=62), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    assert round(snapshot.whale_balance.total_equity, 2) == round(snapshot.whale_balance.initial_total_equity, 2)
+
+
+def test_live_snapshot_exposes_top_agents() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=71), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    assert len(snapshot.top_agents) == 10
+    assert snapshot.top_agents[0].equity >= snapshot.top_agents[-1].equity
+    assert all(entry.alias for entry in snapshot.top_agents)
+
+
+def test_live_session_agent_cash_grows_after_one_simulated_minute() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=81), gpu_enabled=False, auto_run=False)
+    before_equity = snapshot.metrics.total_agent_equity
+
+    advanced = service.step(ticks=60)
+    service.reset()
+
+    assert advanced.metrics.total_agent_equity > before_equity
 
 
 def test_live_whale_order_is_deterministic_for_same_seed() -> None:

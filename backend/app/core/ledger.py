@@ -109,6 +109,14 @@ class Ledger:
         total = sum(balance.total_equity(mark_price) for balance in self._balances.values())
         return total / len(self._balances)
 
+    def total_equity(self, mark_price: float) -> float:
+        return sum(balance.total_equity(mark_price) for balance in self._balances.values())
+
+    def scale_cash(self, multiplier: float) -> None:
+        for balance in self._balances.values():
+            balance.cash_free *= multiplier
+            balance.cash_reserved *= multiplier
+
     def total_inventory(self) -> float:
         return sum(
             balance.asset_free + balance.asset_reserved
