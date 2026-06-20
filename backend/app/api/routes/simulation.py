@@ -97,7 +97,7 @@ def start_live_simulation(
     initial_price: float = Query(default=100.0, gt=0),
     initial_cash: float = Query(default=50000.0, gt=0),
     initial_asset: float = Query(default=1.25, ge=0),
-    tick_interval_ms: int = Query(default=750, ge=200, le=5000),
+    tick_interval_ms: int = Query(default=750, ge=100, le=5000),
     compute_mode: Literal["cpu", "gpu_auto", "gpu_force"] = Query(
         default="cpu"
     ),
@@ -119,6 +119,17 @@ def start_live_simulation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/live/play", response_model=LiveSimulationSnapshot)
+def play_live_simulation(
+    live_service=Depends(get_live_simulation_service),
+    tick_interval_ms: int | None = Query(default=None, ge=100, le=5000),
+) -> LiveSimulationSnapshot:
+    try:
+        return live_service.play(tick_interval_ms=tick_interval_ms)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/live", response_model=LiveSimulationSnapshot)

@@ -188,7 +188,7 @@ Parametros query:
 - `initial_price`: numero `> 0`, por defecto `100.0`.
 - `initial_cash`: numero `> 0`, por defecto `50000.0`.
 - `initial_asset`: numero `>= 0`, por defecto `1.25`.
-- `tick_interval_ms`: entero entre `200` y `5000`, por defecto `750`.
+- `tick_interval_ms`: entero entre `100` y `5000`, por defecto `750`.
 - `compute_mode`: `cpu`, `gpu_auto` o `gpu_force`, por defecto `cpu`.
 
 Respuesta resumida:
@@ -233,6 +233,34 @@ Errores:
 
 - `400` si el modo de compute no puede resolverse o si algun valor no pasa la validacion interna del motor.
 - `422` si FastAPI rechaza parametros por tipo o rango.
+
+## POST /api/v1/simulation/live/play
+
+Reanuda la sesion viva actual sin reemplazarla. Si la sesion estaba pausada, vuelve a arrancar el loop desde el mismo estado; si estaba corriendo, puede cambiar solo la velocidad del loop sin resetear tick, libro, balance ni historial.
+
+Parametros query:
+
+- `tick_interval_ms`: entero opcional entre `100` y `5000`. Si se envia, actualiza la velocidad objetivo antes de continuar.
+
+Respuesta resumida:
+
+```json
+{
+  "session_id": "live-7-8453eb37",
+  "status": "running",
+  "tick": 601,
+  "tick_interval_ms": 125,
+  "config": {},
+  "order_book": {
+    "mid_price": 100.52
+  }
+}
+```
+
+Errores:
+
+- `404` si no existe ninguna sesion viva actual.
+- `422` si FastAPI rechaza `tick_interval_ms` por tipo o rango.
 
 ## GET /api/v1/simulation/live
 

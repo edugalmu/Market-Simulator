@@ -42,9 +42,9 @@ export const marketApi = {
   getLiveSimulation(signal?: AbortSignal) {
     return fetchJson<LiveSimulationSnapshot>('/simulation/live', signal)
   },
-  startLiveSimulation(signal?: AbortSignal) {
+  startLiveSimulation(tickIntervalMs = 750, signal?: AbortSignal) {
     return fetchJson<LiveSimulationSnapshot>(
-      '/simulation/live/start?tick_interval_ms=750',
+      `/simulation/live/start?tick_interval_ms=${tickIntervalMs}`,
       signal,
       { method: 'POST' },
     )
@@ -53,6 +53,15 @@ export const marketApi = {
     return fetchJson<LiveSimulationSnapshot>('/simulation/live/stop', signal, {
       method: 'POST',
     })
+  },
+  playLiveSimulation(tickIntervalMs?: number, signal?: AbortSignal) {
+    const intervalQuery = tickIntervalMs === undefined ? '' : `?tick_interval_ms=${tickIntervalMs}`
+
+    return fetchJson<LiveSimulationSnapshot>(
+      `/simulation/live/play${intervalQuery}`,
+      signal,
+      { method: 'POST' },
+    )
   },
   stepLiveSimulation(ticks = 1, signal?: AbortSignal) {
     return fetchJson<LiveSimulationSnapshot>(

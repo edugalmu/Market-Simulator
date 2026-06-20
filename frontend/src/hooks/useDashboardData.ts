@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { marketApi } from '../api/client'
 import type {
@@ -35,16 +35,36 @@ const initialState: DashboardState = {
 export function useDashboardData() {
   const [state, setState] = useState<DashboardState>(initialState)
   const pollerRef = useRef<number | null>(null)
+  const pollIntervalRef = useRef<number | null>(null)
 
-  function startPolling() {
+  const stopPolling = useCallback(() => {
     if (pollerRef.current !== null) {
+      window.clearInterval(pollerRef.current)
+      pollerRef.current = null
+    }
+
+    pollIntervalRef.current = null
+  }, [])
+
+  const startPolling = useCallback((intervalMs = 1000) => {
+    const nextIntervalMs = Math.max(intervalMs, 150)
+
+    if (pollerRef.current !== null && pollIntervalRef.current === nextIntervalMs) {
       return
     }
+
+    stopPolling()
 
     pollerRef.current = window.setInterval(() => {
       marketApi
         .getLiveSimulation()
         .then((nextSession) => {
+          if (nextSession.status === 'running') {
+            startPolling(nextSession.tick_interval_ms)
+          } else {
+            stopPolling()
+          }
+
           setState((current) => ({
             ...current,
             liveLoading: false,
@@ -60,15 +80,9 @@ export function useDashboardData() {
             liveError: message,
           }))
         })
-    }, 1000)
-  }
-
-  function stopPolling() {
-    if (pollerRef.current !== null) {
-      window.clearInterval(pollerRef.current)
-      pollerRef.current = null
-    }
-  }
+    }, nextIntervalMs)
+    pollIntervalRef.current = nextIntervalMs
+  }, [stopPolling])
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -88,7 +102,7 @@ export function useDashboardData() {
         }))
 
         if (liveSession.status === 'running') {
-          startPolling()
+          startPolling(liveSession.tick_interval_ms)
         }
 
         if (liveSession.status !== 'running') {
@@ -115,7 +129,7 @@ export function useDashboardData() {
       }
     }
 
-    async function startLiveSession(signal?: AbortSignal) {
+    async function startLiveSessionForInterval(tickIntervalMs: number, signal?: AbortSignal) {
       setState((current) => ({
         ...current,
         liveLoading: true,
@@ -124,7 +138,7 @@ export function useDashboardData() {
       }))
 
       try {
-        const liveSession = await marketApi.startLiveSimulation(signal)
+        const liveSession = await marketApi.startLiveSimulation(tickIntervalMs, signal)
         if (signal?.aborted) {
           return
         }
@@ -204,7 +218,7 @@ export function useDashboardData() {
         if (!abortController.signal.aborted) {
           const snapshot = await marketApi.getLiveSimulation(abortController.signal).catch(() => null)
           if (!snapshot) {
-            await startLiveSession(abortController.signal)
+            await startLiveSessionForInterval(750, abortController.signal)
           }
         }
       }
@@ -232,9 +246,9 @@ export function useDashboardData() {
       stopPolling()
       abortController.abort()
     }
-  }, [])
+  }, [startPolling, stopPolling])
 
-  async function startLiveSession() {
+  async function startLiveSession(tickIntervalMs = 750) {
     setState((current) => ({
       ...current,
       actionLoading: true,
@@ -242,9 +256,9 @@ export function useDashboardData() {
     }))
 
     try {
-      const liveSession = await marketApi.startLiveSimulation()
+      const liveSession = await marketApi.startLiveSimulation(tickIntervalMs)
       stopPolling()
-      startPolling()
+      startPolling(liveSession.tick_interval_ms)
 
       setState((current) => ({
         ...current,
@@ -287,6 +301,35 @@ export function useDashboardData() {
         actionLoading: false,
         liveError:
           error instanceof Error ? error.message : 'No se pudo detener la simulacion.',
+      }))
+    }
+  }
+
+  async function playLiveSession(tickIntervalMs?: number) {
+    setState((current) => ({
+      ...current,
+      actionLoading: true,
+      liveError: null,
+    }))
+
+    try {
+      const liveSession = await marketApi.playLiveSimulation(tickIntervalMs)
+      stopPolling()
+      startPolling(liveSession.tick_interval_ms)
+
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveLoading: false,
+        liveError: null,
+        liveSession,
+      }))
+    } catch (error: unknown) {
+      setState((current) => ({
+        ...current,
+        actionLoading: false,
+        liveError:
+          error instanceof Error ? error.message : 'No se pudo reanudar la simulacion.',
       }))
     }
   }
@@ -346,6 +389,7 @@ export function useDashboardData() {
   return {
     ...state,
     startLiveSession,
+    playLiveSession,
     stopLiveSession,
     stepLiveSession,
     executeWhaleOrder,

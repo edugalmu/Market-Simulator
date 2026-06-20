@@ -43,6 +43,14 @@ def test_live_simulation_endpoints() -> None:
     assert stop_response.status_code == 200
     assert stop_response.json()["status"] == "stopped"
 
+    play_response = client.post("/api/v1/simulation/live/play?tick_interval_ms=125")
+    assert play_response.status_code == 200
+    play_payload = play_response.json()
+    assert play_payload["status"] == "running"
+    assert play_payload["session_id"] == start_payload["session_id"]
+    assert play_payload["tick"] >= stop_response.json()["tick"]
+    assert play_payload["tick_interval_ms"] == 125
+
     live_service.reset()
 
 

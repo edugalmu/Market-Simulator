@@ -89,18 +89,20 @@ Para la sesion viva minima implementada hoy:
 Frontend React
   -> consulta snapshot /api/v1/simulation/live
   -> inicia o reinicia la sesion viva
-  -> poll cada 1s para refrescar estado
+  -> poll con una cadencia alineada al `tick_interval_ms` activo para reflejar los modos normal, rapido y muy rapido
 Backend FastAPI
   -> mantiene una sesion en memoria
   -> selecciona un subconjunto activo por tick
   -> ejecuta market intents pequenos sobre liquidez sintetica
   -> recompone el libro alrededor del nuevo precio
   -> expone tick, metricas, `recent_mid_prices` y `ohlcv_history` para la visualizacion viva
+Frontend React
+  -> puede reagrupar `ohlcv_history` en ventanas 1s/5s/10s/30s/1 min para visualizacion sin cambiar motor, balances ni matching
 ```
 
 El flujo todavia no implementa persistencia, ordenes limite vivas, cancelaciones, replay ni streaming.
 
-La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI mantiene `recent_mid_prices` solo como fallback cuando aun no hay suficientes barras para dibujar velas.
+La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI puede reagrupar esas barras en marcos 1s/5s/10s/30s/1 min sin recalcular fills ni balances, preservando el ultimo impacto de ballena dentro de la vela agregada correspondiente y limitando la ventana visible para no saturar la grafica. `recent_mid_prices` se mantiene solo como fallback cuando aun no hay suficientes barras para dibujar velas.
 
 ## Limite funcional de la primera fase
 
@@ -123,6 +125,7 @@ La interfaz puede:
 - enviar configuracion de sesiones cuando existan endpoints;
 - disparar shocks cuando existan endpoints;
 - usar `ohlcv_history` como fuente preferente para la grafica principal y `recent_mid_prices` solo como fallback;
+- reagrupar `ohlcv_history` en distintos marcos visuales sin alterar el contrato ni la autoridad del backend;
 - reproducir eventos cuando exista replay.
 
 La interfaz no puede:

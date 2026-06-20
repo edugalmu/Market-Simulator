@@ -3,6 +3,10 @@ from app.simulation.live import LiveSimulationService
 from app.simulation.models import SessionConfig
 
 
+def expected_preloaded_ticks(tick_interval_ms: int) -> int:
+    return max(((10 * 60 * 1000) + tick_interval_ms - 1) // tick_interval_ms, 1)
+
+
 def assert_ohlcv_bar_invariants(bar) -> None:
     assert bar.high >= bar.open
     assert bar.high >= bar.close
@@ -63,13 +67,14 @@ def test_live_session_step_advances_ticks_and_preserves_depth() -> None:
         gpu_enabled=False,
         auto_run=False,
     )
+    preload_ticks = expected_preloaded_ticks(snapshot.tick_interval_ms)
 
     advanced = service.step(ticks=6)
     service.reset()
 
-    assert snapshot.tick == 1
-    assert len(snapshot.ohlcv_history) == 1
-    assert advanced.tick == 7
+    assert snapshot.tick == preload_ticks
+    assert len(snapshot.ohlcv_history) == snapshot.tick
+    assert advanced.tick == preload_ticks + 6
     assert advanced.last_tick is not None
     assert advanced.last_tick.active_agents > 0
     assert advanced.order_book.best_bid < advanced.order_book.best_ask
@@ -127,6 +132,29 @@ def test_live_ohlcv_history_marks_whale_buy_and_sell_events() -> None:
 
     for bar in sell_response.snapshot.ohlcv_history:
         assert_ohlcv_bar_invariants(bar)
+
+
+def test_live_session_play_resumes_without_resetting_state() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(
+        SessionConfig(seed=23),
+        gpu_enabled=False,
+        auto_run=False,
+        tick_interval_ms=750,
+    )
+    advanced = service.step(ticks=4)
+    paused = service.stop()
+
+    resumed = service.play(tick_interval_ms=125)
+    service.reset()
+
+    assert paused.session_id == advanced.session_id
+    assert paused.tick == advanced.tick
+    assert paused.status == "stopped"
+    assert resumed.session_id == snapshot.session_id
+    assert resumed.tick == advanced.tick
+    assert resumed.tick_interval_ms == 125
+    assert resumed.status == "running"
 
 
 def test_live_whale_order_is_deterministic_for_same_seed() -> None:

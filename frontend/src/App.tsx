@@ -1,10 +1,31 @@
 import { useState } from 'react'
 
 import { MetricCard } from './components/MetricCard'
-import { PriceChart } from './components/PriceChart'
+import { PriceChart, type ChartBar } from './components/PriceChart'
 import { SectionCard } from './components/SectionCard'
 import { useDashboardData } from './hooks/useDashboardData'
+import type { OhlcvBar } from './types/market'
 import './App.css'
+
+type TimeframeSeconds = 1 | 5 | 10 | 30 | 60
+type SimulationSpeed = 'normal' | 'fast' | 'very-fast'
+
+const TIMEFRAME_OPTIONS: TimeframeSeconds[] = [1, 5, 10, 30, 60]
+const PRELOADED_WINDOW_SECONDS = 10 * 60
+const WHALE_INITIAL_CASH = 250_000
+const WHALE_INITIAL_ASSET = 5_000
+const SPEED_TO_INTERVAL_MS: Record<SimulationSpeed, number> = {
+  normal: 750,
+  fast: 250,
+  'very-fast': 125,
+}
+const VISIBLE_BAR_TARGETS: Record<TimeframeSeconds, number> = {
+  1: 120,
+  5: 120,
+  10: 90,
+  30: 80,
+  60: 60,
+}
 
 function App() {
   const {
@@ -18,13 +39,18 @@ function App() {
     whalePreview,
     liveSession,
     startLiveSession,
+    playLiveSession,
     stopLiveSession,
     stepLiveSession,
     executeWhaleOrder,
   } = useDashboardData()
   const [whaleNotionalInput, setWhaleNotionalInput] = useState('3000')
+  const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeSeconds>(1)
+  const [isDevMode, setIsDevMode] = useState(false)
+  const [selectedSpeed, setSelectedSpeed] = useState<SimulationSpeed>('normal')
 
   const whalePresets = [1000, 3000, 10000, 25000]
+  const visibleWhalePresets = isDevMode ? whalePresets : whalePresets.slice(0, 3)
   const whaleNotional = Number.parseFloat(whaleNotionalInput.replace(',', '.'))
   const hasValidWhaleNotional = Number.isFinite(whaleNotional) && whaleNotional > 0
   const whaleActionDisabled =
@@ -34,41 +60,26 @@ function App() {
     !hasValidWhaleNotional
   const lastWhaleOrder = liveSession?.last_whale_order ?? null
   const whaleBalance = liveSession?.whale_balance ?? null
-  const chartBars = (liveSession?.ohlcv_history ?? []).slice(-80)
-  const chartPrices = (liveSession?.recent_mid_prices ?? []).slice(-80)
-  const hasAuthoritativeChart = chartBars.length >= 2
-  const latestChartEntries = hasAuthoritativeChart
-    ? chartBars.slice(-8).map((bar) => ({
-        tick: bar.tick,
-        price: bar.close,
-        impactSide: bar.whale_side,
-        isCurrent: bar.tick === (liveSession?.tick ?? -1),
-      }))
-    : chartPrices.slice(-8).map((price, index, latestPrices) => {
-        const fullIndex = chartPrices.length - latestPrices.length + index
-        const tick = Math.max(
-          (liveSession?.tick ?? 0) - (chartPrices.length - 1 - fullIndex),
-          0,
-        )
-
-        return {
-          tick,
-          price,
-          impactSide: lastWhaleOrder?.tick === tick ? lastWhaleOrder.side : null,
-          isCurrent: tick === (liveSession?.tick ?? -1),
-        }
-      })
-  const lastImpactSummary = lastWhaleOrder
-    ? `${lastWhaleOrder.side.toUpperCase()} ${lastWhaleOrder.price_impact_bps >= 0 ? '+' : ''}${lastWhaleOrder.price_impact_bps.toFixed(2)} bps`
-    : 'Sin orden'
-  const chartSourceTag = hasAuthoritativeChart
-    ? `${chartBars.length} barras · OHLCV real`
-    : chartPrices.length > 0
-      ? `${chartPrices.length} muestras · velas agrupadas`
-      : 'sin muestras'
-  const chartSourceNote = hasAuthoritativeChart
-    ? 'La grafica usa barras OHLCV generadas por backend por tick. El volumen refleja la cantidad ejecutada y el impacto de ballena se ancla al tick real del evento.'
-    : 'La grafica agrupa el `mid-price` vivo en bloques para construir velas simples con apertura, maximo, minimo y cierre. El volumen real por barra todavia no viene del backend, asi que este fallback prioriza la lectura visual del movimiento.'
+  const rawOhlcvHistory = liveSession?.ohlcv_history ?? []
+  const configuredTickIntervalMs = SPEED_TO_INTERVAL_MS[selectedSpeed]
+  const tickIntervalMs = liveSession?.tick_interval_ms ?? configuredTickIntervalMs
+  const referenceTimeMs = getReferenceTimeMs(liveSession?.updated_at)
+  const visibleBarCount = VISIBLE_BAR_TARGETS[selectedTimeframe]
+  const visiblePriceSampleCount = Math.ceil((PRELOADED_WINDOW_SECONDS * 1000) / tickIntervalMs) + 1
+  const chartPrices = (liveSession?.recent_mid_prices ?? []).slice(-visiblePriceSampleCount)
+  const chartBars = aggregateOhlcvBars(rawOhlcvHistory, selectedTimeframe, tickIntervalMs).slice(-visibleBarCount)
+  const fallbackBars = buildGroupedPriceBars(chartPrices, liveSession?.tick ?? 0, selectedTimeframe, tickIntervalMs).slice(-visibleBarCount)
+  const activeChartBars = chartBars.length > 0 ? chartBars : fallbackBars
+  const whaleCashTotal = whaleBalance ? whaleBalance.cash_free + whaleBalance.cash_reserved : null
+  const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
+  const initialPrice = liveSession?.config.initial_price ?? summary?.config.initial_price ?? 100
+  const initialWhaleEquity = WHALE_INITIAL_CASH + WHALE_INITIAL_ASSET * initialPrice
+  const estimatedPnl = whaleBalance
+    ? whaleBalance.total_equity - initialWhaleEquity
+    : null
+  const executedPnl = whaleBalance && whaleCashTotal !== null && whaleTokenTotal !== null
+    ? whaleCashTotal + whaleTokenTotal * initialPrice - initialWhaleEquity
+    : null
 
   const architecturePillars = [
     'Backend FastAPI desacoplado de la UI',
@@ -97,127 +108,242 @@ function App() {
       ? 'impact-chip impact-chip--sell'
       : 'impact-chip'
 
+  function handlePauseSimulation() {
+    if (!liveSession || liveSession.status !== 'running') {
+      return
+    }
+
+    void stopLiveSession()
+  }
+
+  function handleSpeedSelection(speed: SimulationSpeed) {
+    const nextInterval = SPEED_TO_INTERVAL_MS[speed]
+    setSelectedSpeed(speed)
+
+    if (!liveSession) {
+      void startLiveSession(nextInterval)
+      return
+    }
+
+    void playLiveSession(nextInterval)
+  }
+
   return (
     <main className="app-shell">
       <section className="hero-panel">
-        <div className="hero-panel__copy">
-          <p className="eyebrow">Market Simulator · Scaffold local-first</p>
-          <h1>Motor de simulacion separado. Simulacion viva minima ya en marcha.</h1>
-          <p className="hero-panel__body">
-            La app ya puede abrir una sesion viva en memoria, avanzar por ticks y
-            activar subconjuntos de agentes simples que barren liquidez sintetica
-            del libro para mover precio, spread y metricas en tiempo real.
-          </p>
-        </div>
+        <div className="hero-spotlight">
+          <div className="hero-spotlight__header">
+            <p className="eyebrow">Mercado en vivo</p>
+            <div className="hero-spotlight__badges">
+              <span className="status-pill">{loading ? 'Cargando backend' : liveStatus}</span>
+              <span className="status-pill status-pill--accent">
+                {health?.gpu_enabled ? 'GPU habilitada' : 'CPU por defecto'}
+              </span>
+            </div>
+          </div>
 
-        <div className="hero-panel__status">
-          <span className="status-pill">{loading ? 'Cargando backend' : liveStatus}</span>
-          <span className="status-pill status-pill--accent">
-            {health?.gpu_enabled ? 'GPU habilitada' : 'CPU por defecto'}
-          </span>
-          {liveSession ? <span className="status-pill">Tick {liveSession.tick}</span> : null}
-        </div>
+          <div className="hero-highlights hero-highlights--compact hero-highlights--minimal">
+            <div className="hero-stat">
+              <span>Precio</span>
+              <strong>{liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : '--'}</strong>
+            </div>
+          </div>
 
-        <div className="control-row">
-          <button className="control-button" onClick={() => void startLiveSession()} disabled={actionLoading}>
-            {liveSession ? 'Reiniciar simulacion' : 'Iniciar simulacion'}
-          </button>
-          <button
-            className="control-button control-button--secondary"
-            onClick={() => void stopLiveSession()}
-            disabled={actionLoading || !liveSession || liveSession.status !== 'running'}
-          >
-            Detener
-          </button>
-          <button
-            className="control-button control-button--ghost"
-            onClick={() => void stepLiveSession(5)}
-            disabled={actionLoading || !liveSession}
-          >
-            Avanzar 5 ticks
-          </button>
-        </div>
-      </section>
+          <div className="market-toolbar">
+            <div className="market-toolbar__top">
+              <div className="simulation-box">
+                <span className="simulation-box__label">Simulacion</span>
+                <div className="simulation-box__actions simulation-box__actions--stacked">
+                  <button className="control-button control-button--wide" onClick={() => void startLiveSession(configuredTickIntervalMs)} disabled={actionLoading}>
+                    Reiniciar simulacion
+                  </button>
+                </div>
 
-      <section className="metrics-grid">
-        <MetricCard label="Backend" value={health ? health.phase : 'pendiente'} tone="accent" />
-        <MetricCard label="Sesion viva" value={liveSession?.status ?? 'sin sesion'} />
-        <MetricCard
-          label="Agentes objetivo"
-          value={(liveSession?.config.agent_count ?? summary?.config.agent_count ?? 1000).toLocaleString('es-ES')}
-        />
-        <MetricCard
-          label="Precio medio"
-          value={liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : summary ? `$${summary.order_book.mid_price.toFixed(2)}` : '$100.00'}
-        />
-        <MetricCard
-          label="Compute activo"
-          value={liveSession?.metrics.active_compute_backend ?? summary?.metrics.active_compute_backend ?? 'cpu'}
-        />
+                <div className="speed-selector speed-selector--full" role="group" aria-label="Controles de pausa y velocidad de simulacion">
+                  <button
+                    aria-label="Pausar simulacion"
+                    className={`speed-button speed-button--icon${liveSession?.status === 'stopped' ? ' speed-button--selected' : ''}`}
+                    onClick={handlePauseSimulation}
+                    title="Pausa"
+                    type="button"
+                    disabled={actionLoading || !liveSession || liveSession.status !== 'running'}
+                  >
+                    ||
+                  </button>
+                  {([
+                    { key: 'normal', label: '>', title: 'Velocidad normal' },
+                    { key: 'fast', label: '>>', title: 'Doble play' },
+                    { key: 'very-fast', label: '>>>', title: 'Triple play' },
+                  ] as const).map((speed) => (
+                    <button
+                      key={speed.key}
+                      aria-label={speed.title}
+                      className={`speed-button speed-button--icon${selectedSpeed === speed.key && liveSession?.status === 'running' ? ' speed-button--selected' : ''}`}
+                      onClick={() => handleSpeedSelection(speed.key)}
+                      title={speed.title}
+                      type="button"
+                      disabled={actionLoading}
+                    >
+                      {speed.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="simulation-box__footer">
+                  <button
+                    className={`mode-toggle${isDevMode ? ' mode-toggle--active' : ''}`}
+                    onClick={() => setIsDevMode((current) => !current)}
+                    type="button"
+                  >
+                    Modo DEV
+                  </button>
+
+                  {isDevMode ? (
+                    <button
+                      className="control-button control-button--step"
+                      onClick={() => void stepLiveSession(5)}
+                      disabled={actionLoading || !liveSession}
+                    >
+                      Avanzar 5 ticks
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="timeframe-selector timeframe-selector--market" role="group" aria-label="Selector de marco temporal de velas">
+                <span className="timeframe-selector__label">Velas</span>
+                <div className="timeframe-selector__actions timeframe-selector__actions--chart">
+                  {TIMEFRAME_OPTIONS.map((timeframe) => {
+                    const isSelected = selectedTimeframe === timeframe
+                    const buttonClassName = [
+                      'timeframe-button',
+                      isSelected ? 'timeframe-button--selected' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+
+                    return (
+                      <button
+                        key={timeframe}
+                        className={buttonClassName}
+                        onClick={() => setSelectedTimeframe(timeframe)}
+                        type="button"
+                      >
+                        {formatTimeframeOptionLabel(timeframe)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="market-trade-bar">
+              <div className="market-trade-bar__presets">
+                {visibleWhalePresets.map((preset) => {
+                  const selected = Number.parseFloat(whaleNotionalInput.replace(',', '.')) === preset
+                  return (
+                    <button
+                      key={preset}
+                      className={`notional-chip${selected ? ' notional-chip--selected' : ''}`}
+                      onClick={() => setWhaleNotionalInput(String(preset))}
+                      type="button"
+                    >
+                      {preset.toLocaleString('es-ES')}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {isDevMode ? (
+                <label className="input-stack input-stack--compact">
+                  <span>Notional</span>
+                  <input
+                    className="control-input control-input--compact"
+                    type="number"
+                    min="1"
+                    step="100"
+                    value={whaleNotionalInput}
+                    onChange={(event) => setWhaleNotionalInput(event.target.value)}
+                  />
+                </label>
+              ) : null}
+
+              <div className="market-trade-bar__actions">
+                <button
+                  className="control-button control-button--buy"
+                  onClick={() => void executeWhaleOrder('buy', whaleNotional)}
+                  disabled={whaleActionDisabled}
+                >
+                  Whale Buy
+                </button>
+                <button
+                  className="control-button control-button--sell"
+                  onClick={() => void executeWhaleOrder('sell', whaleNotional)}
+                  disabled={whaleActionDisabled}
+                >
+                  Whale Sell
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="position-strip">
+            <div className="position-pill">
+              <span>P&L estimado</span>
+              <strong className={getPnlClassName(estimatedPnl)}>
+                {formatSignedCurrency(estimatedPnl)}
+              </strong>
+            </div>
+            <div className="position-pill">
+              <span>P&L ejecutado</span>
+              <strong className={getPnlClassName(executedPnl)}>
+                {formatSignedCurrency(executedPnl)}
+              </strong>
+            </div>
+            <div className="position-pill">
+              <span>Tokens</span>
+              <strong className="position-pill__value">{formatQuantity(whaleTokenTotal, 4)}</strong>
+            </div>
+            <div className="position-pill">
+              <span>Dolares</span>
+              <strong className="position-pill__value">{formatCurrency(whaleCashTotal)}</strong>
+            </div>
+          </div>
+
+          <PriceChart
+            prices={chartPrices}
+            bars={activeChartBars}
+            currentTick={liveSession?.tick ?? 0}
+            mode="candles"
+            tickIntervalMs={tickIntervalMs}
+            referenceTimeMs={referenceTimeMs}
+          />
+        </div>
       </section>
 
       {error ? <p className="banner banner--warning">{error}</p> : null}
       {liveError ? <p className="banner banner--warning">{liveError}</p> : null}
 
-      <section className="content-grid">
-        <div className="market-focus-card">
-          <SectionCard
-            title="Mercado en vivo"
-            eyebrow="Grafica principal"
-            aside={<span className="micro-tag">{chartSourceTag}</span>}
-          >
-            <div className="chart-summary-grid">
-              <MetricCard
-                label="Precio actual"
-                value={liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : '--'}
-                tone="accent"
-              />
-              <MetricCard
-                label="Tick"
-                value={liveSession ? `T${liveSession.tick}` : '--'}
-              />
-              <MetricCard
-                label="Ultimo impacto"
-                value={lastImpactSummary}
-              />
-              <MetricCard
-                label="Spread"
-                value={liveSession ? `${liveSession.order_book.spread_bps.toFixed(2)} bps` : '--'}
-              />
-            </div>
+      {isDevMode ? (
+        <section className="metrics-grid">
+          <MetricCard label="Backend" value={health ? health.phase : 'pendiente'} tone="accent" />
+          <MetricCard label="Sesion viva" value={liveSession?.status ?? 'sin sesion'} />
+          <MetricCard
+            label="Agentes objetivo"
+            value={(liveSession?.config.agent_count ?? summary?.config.agent_count ?? 1000).toLocaleString('es-ES')}
+          />
+          <MetricCard
+            label="Precio medio"
+            value={liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : summary ? `$${summary.order_book.mid_price.toFixed(2)}` : '$100.00'}
+          />
+          <MetricCard
+            label="Compute activo"
+            value={liveSession?.metrics.active_compute_backend ?? summary?.metrics.active_compute_backend ?? 'cpu'}
+          />
+        </section>
+      ) : null}
 
-            <PriceChart
-              prices={chartPrices}
-              bars={chartBars}
-              currentTick={liveSession?.tick ?? 0}
-              lastWhaleOrder={lastWhaleOrder}
-              mode="candles"
-            />
-
-            {latestChartEntries.length > 0 ? (
-              <div className="price-strip price-strip--chart">
-                {latestChartEntries.map((entry) => {
-                  const chipClassName = [
-                    'price-chip',
-                    entry.isCurrent ? 'price-chip--current' : '',
-                    entry.impactSide ? `price-chip--${entry.impactSide}` : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-
-                  return (
-                    <div className={chipClassName} key={`${entry.tick}-${entry.price}`}>
-                      <span>T{entry.tick}</span>
-                      <strong>${entry.price.toFixed(2)}</strong>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : null}
-
-            <p className="section-note">{chartSourceNote}</p>
-          </SectionCard>
-        </div>
+      {isDevMode ? <section className="content-grid">
 
         <SectionCard
           title="Sesion en vivo"
@@ -265,59 +391,6 @@ function App() {
           <p className="section-note">
             La sesion viva se inicia automaticamente al cargar la app si no existe una activa.
             Usa reiniciar para arrancar otra desde la seed base o avanzar ticks manuales si la detienes.
-          </p>
-        </SectionCard>
-
-        <SectionCard
-          title="Control de ballena"
-          eyebrow="Modo jugable"
-          aside={<span className={whaleImpactTone}>{lastWhaleOrder?.impact_label ?? 'SIN IMPACTO'}</span>}
-        >
-          <div className="notional-row">
-            {whalePresets.map((preset) => {
-              const selected = Number.parseFloat(whaleNotionalInput.replace(',', '.')) === preset
-              return (
-                <button
-                  key={preset}
-                  className={`notional-chip${selected ? ' notional-chip--selected' : ''}`}
-                  onClick={() => setWhaleNotionalInput(String(preset))}
-                  type="button"
-                >
-                  {preset.toLocaleString('es-ES')}
-                </button>
-              )
-            })}
-          </div>
-          <label className="input-stack">
-            <span>Notional manual</span>
-            <input
-              className="control-input"
-              type="number"
-              min="1"
-              step="100"
-              value={whaleNotionalInput}
-              onChange={(event) => setWhaleNotionalInput(event.target.value)}
-            />
-          </label>
-          <div className="control-row">
-            <button
-              className="control-button control-button--buy"
-              onClick={() => void executeWhaleOrder('buy', whaleNotional)}
-              disabled={whaleActionDisabled}
-            >
-              Whale Buy
-            </button>
-            <button
-              className="control-button control-button--sell"
-              onClick={() => void executeWhaleOrder('sell', whaleNotional)}
-              disabled={whaleActionDisabled}
-            >
-              Whale Sell
-            </button>
-          </div>
-          <p className="section-note">
-            Estas ordenes actuan sobre el libro vivo actual. El backend devuelve el fill, el impacto
-            y el balance actualizado de la ballena; la UI solo lo representa.
           </p>
         </SectionCard>
 
@@ -528,9 +601,167 @@ function App() {
             <code> docs/</code> del repositorio.
           </p>
         </SectionCard>
-      </section>
+      </section> : null}
     </main>
   )
+}
+
+function aggregateOhlcvBars(bars: OhlcvBar[], timeframeSeconds: number, tickIntervalMs: number): ChartBar[] {
+  if (bars.length === 0) {
+    return []
+  }
+
+  const aggregated: ChartBar[] = []
+  let currentBucketKey: number | null = null
+  let currentGroup: OhlcvBar[] = []
+
+  bars.forEach((bar) => {
+    const bucketKey = getTimeBucketKey(bar.tick, timeframeSeconds, tickIntervalMs)
+
+    if (currentBucketKey === null || bucketKey === currentBucketKey) {
+      currentBucketKey = bucketKey
+      currentGroup.push(bar)
+      return
+    }
+
+    aggregated.push(buildBackendChartBar(currentGroup))
+    currentBucketKey = bucketKey
+    currentGroup = [bar]
+  })
+
+  if (currentGroup.length > 0) {
+    aggregated.push(buildBackendChartBar(currentGroup))
+  }
+
+  return aggregated
+}
+
+function buildGroupedPriceBars(prices: number[], currentTick: number, timeframeSeconds: number, tickIntervalMs: number): ChartBar[] {
+  if (prices.length === 0) {
+    return []
+  }
+
+  const startTick = Math.max(currentTick - prices.length + 1, 0)
+  const groupedBars: ChartBar[] = []
+  let currentBucketKey: number | null = null
+  let currentGroup: Array<{ tick: number, price: number }> = []
+
+  prices.forEach((price, index) => {
+    const tick = startTick + index
+    const bucketKey = getTimeBucketKey(tick, timeframeSeconds, tickIntervalMs)
+
+    if (currentBucketKey === null || bucketKey === currentBucketKey) {
+      currentBucketKey = bucketKey
+      currentGroup.push({ tick, price })
+      return
+    }
+
+    groupedBars.push(buildGroupedChartBar(currentGroup))
+    currentBucketKey = bucketKey
+    currentGroup = [{ tick, price }]
+  })
+
+  if (currentGroup.length > 0) {
+    groupedBars.push(buildGroupedChartBar(currentGroup))
+  }
+
+  return groupedBars
+}
+
+function buildBackendChartBar(group: OhlcvBar[]): ChartBar {
+  const latestWhaleBar = [...group]
+    .reverse()
+    .find((bar) => bar.whale_side !== null)
+
+  return {
+    tickStart: group[0].tick,
+    tickEnd: group[group.length - 1].tick,
+    open: group[0].open,
+    high: Math.max(...group.map((bar) => bar.high)),
+    low: Math.min(...group.map((bar) => bar.low)),
+    close: group[group.length - 1].close,
+    volume: roundChartMetric(group.reduce((sum, bar) => sum + bar.volume, 0)),
+    trades: group.reduce((sum, bar) => sum + bar.trades, 0),
+    whaleSide: latestWhaleBar?.whale_side ?? null,
+    whaleImpactBps: latestWhaleBar?.whale_impact_bps ?? null,
+    source: 'backend',
+  }
+}
+
+function buildGroupedChartBar(group: Array<{ tick: number, price: number }>): ChartBar {
+  return {
+    tickStart: group[0].tick,
+    tickEnd: group[group.length - 1].tick,
+    open: group[0].price,
+    high: Math.max(...group.map((entry) => entry.price)),
+    low: Math.min(...group.map((entry) => entry.price)),
+    close: group[group.length - 1].price,
+    volume: null,
+    trades: null,
+    whaleSide: null,
+    whaleImpactBps: null,
+    source: 'grouped',
+  }
+}
+
+function getTimeBucketKey(tick: number, timeframeSeconds: number, tickIntervalMs: number) {
+  const elapsedMs = Math.max(tick - 1, 0) * Math.max(tickIntervalMs, 1)
+  const timeframeMs = Math.max(timeframeSeconds, 1) * 1000
+
+  return Math.floor(elapsedMs / timeframeMs)
+}
+
+function formatCurrency(value: number | null) {
+  if (value === null) {
+    return '--'
+  }
+
+  return `$${value.toFixed(2)}`
+}
+
+function formatSignedCurrency(value: number | null) {
+  if (value === null) {
+    return '--'
+  }
+
+  const prefix = value > 0 ? '+' : ''
+  return `${prefix}$${value.toFixed(2)}`
+}
+
+function getPnlClassName(value: number | null) {
+  if (value === null || value === 0) {
+    return 'position-pill__value'
+  }
+
+  return value > 0
+    ? 'position-pill__value position-pill__value--positive'
+    : 'position-pill__value position-pill__value--negative'
+}
+
+function formatTimeframeOptionLabel(timeframe: TimeframeSeconds) {
+  if (timeframe >= 60) {
+    return `${timeframe / 60} min`
+  }
+
+  return `${timeframe}s`
+}
+
+function formatQuantity(value: number | null, digits: number) {
+  if (value === null) {
+    return '--'
+  }
+
+  return value.toFixed(digits)
+}
+
+function getReferenceTimeMs(updatedAt?: string) {
+  const parsed = updatedAt ? Date.parse(updatedAt) : Number.NaN
+
+  return Number.isNaN(parsed) ? Date.now() : parsed
+}
+
+function roundChartMetric(value: number) {
+  return Math.round(value * 1_000_000) / 1_000_000
 }
 
 export default App

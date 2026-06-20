@@ -30,6 +30,8 @@ from app.simulation.scheduler import select_active_agent_count
 DEFAULT_TICK_INTERVAL_MS = 750
 MAX_PRICE_HISTORY = 24
 MAX_OHLCV_HISTORY = 80
+PRELOADED_WINDOW_MS = 10 * 60 * 1000
+PRELOADED_HISTORY_MARGIN = 12
 WHALE_AGENT_ID = 0
 WHALE_INITIAL_CASH = 250_000.0
 WHALE_INITIAL_ASSET = 5_000.0
@@ -112,6 +114,8 @@ class LiveSimulationService:
                 )
             }
         )
+        history_size = _history_size_for(tick_interval_ms)
+        preloaded_tick_count = _preloaded_tick_count(tick_interval_ms)
 
         session = LiveSessionState(
             session_id=f"live-{config.seed}-{uuid4().hex[:8]}",
@@ -126,7 +130,8 @@ class LiveSimulationService:
             tick_interval_ms=tick_interval_ms,
             running=auto_run,
             last_price=order_book.mid_price or config.initial_price,
-            price_history=deque([order_book.mid_price or config.initial_price], maxlen=MAX_PRICE_HISTORY),
+            price_history=deque([order_book.mid_price or config.initial_price], maxlen=history_size),
+            ohlcv_history=deque(maxlen=history_size),
             runtime_state={
                 profile.agent_id: AgentRuntimeState(
                     fair_value_estimate=round(
@@ -143,7 +148,8 @@ class LiveSimulationService:
         with self._lock:
             self._stop_event = Event()
             self._session = session
-            self._advance_session_locked(session)
+            for _ in range(preloaded_tick_count):
+                self._advance_session_locked(session)
 
         if auto_run:
             thread = Thread(
@@ -200,6 +206,59 @@ class LiveSimulationService:
             raise LookupError("No live simulation session is currently active.")
         return snapshot
 
+    def play(self, *, tick_interval_ms: int | None = None) -> LiveSimulationSnapshot:
+        thread_to_join: Thread | None = None
+        thread_to_start: Thread | None = None
+
+        with self._lock:
+            if self._session is None:
+                raise LookupError("No live simulation session is currently active.")
+
+            session = self._session
+            interval_changed = (
+                tick_interval_ms is not None
+                and tick_interval_ms != session.tick_interval_ms
+            )
+            if tick_interval_ms is not None:
+                session.tick_interval_ms = tick_interval_ms
+
+            session.running = True
+            session.updated_at = _utc_now()
+
+            should_restart_thread = (
+                self._thread is None
+                or not self._thread.is_alive()
+                or self._stop_event.is_set()
+                or interval_changed
+            )
+            if should_restart_thread:
+                if self._thread is not None and self._thread.is_alive():
+                    self._stop_event.set()
+                    thread_to_join = self._thread
+
+                self._stop_event = Event()
+                thread_to_start = Thread(
+                    target=self._run_loop,
+                    args=(session.session_id, self._stop_event),
+                    daemon=True,
+                    name="market-simulator-live-loop",
+                )
+                self._thread = thread_to_start
+
+            snapshot = self._build_snapshot(session)
+
+        if (
+            thread_to_join is not None
+            and thread_to_join.is_alive()
+            and thread_to_join is not current_thread()
+        ):
+            thread_to_join.join(timeout=2.0)
+
+        if thread_to_start is not None:
+            thread_to_start.start()
+
+        return snapshot
+
     def reset(self) -> None:
         self._stop(clear_session=True)
 
@@ -233,9 +292,18 @@ class LiveSimulationService:
         return snapshot
 
     def _run_loop(self, session_id: str, stop_event: Event) -> None:
-        interval_seconds = max((self._session.tick_interval_ms if self._session else DEFAULT_TICK_INTERVAL_MS) / 1000, 0.1)
+        while True:
+            with self._lock:
+                if self._session is None or self._session.session_id != session_id:
+                    return
+                if not self._session.running:
+                    return
 
-        while not stop_event.wait(interval_seconds):
+                interval_seconds = max(self._session.tick_interval_ms / 1000, 0.1)
+
+            if stop_event.wait(interval_seconds):
+                return
+
             with self._lock:
                 if self._session is None or self._session.session_id != session_id:
                     return
@@ -758,6 +826,15 @@ def _resolve_post_trade_price(
         return round(fill_price, 4)
 
     return round(fallback_price, 4)
+
+
+def _preloaded_tick_count(tick_interval_ms: int) -> int:
+    safe_interval = max(tick_interval_ms, 1)
+    return max((PRELOADED_WINDOW_MS + safe_interval - 1) // safe_interval, 1)
+
+
+def _history_size_for(tick_interval_ms: int) -> int:
+    return max(_preloaded_tick_count(tick_interval_ms) + PRELOADED_HISTORY_MARGIN, MAX_OHLCV_HISTORY)
 
 
 def _decay_bias(value: float) -> float:

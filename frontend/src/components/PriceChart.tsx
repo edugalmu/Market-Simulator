@@ -1,6 +1,18 @@
-import type { LiveWhaleOrderOutcome, OhlcvBar } from '../types/market'
-
 export type ChartMode = 'line' | 'candles'
+
+export type ChartBar = {
+  tickStart: number
+  tickEnd: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number | null
+  trades: number | null
+  whaleSide: 'buy' | 'sell' | null
+  whaleImpactBps: number | null
+  source: 'backend' | 'grouped'
+}
 
 type CandleDatum = {
   tickStart: number
@@ -11,6 +23,8 @@ type CandleDatum = {
   close: number
   volume: number | null
   trades: number | null
+  whaleSide: 'buy' | 'sell' | null
+  whaleImpactBps: number | null
   source: 'backend' | 'grouped'
 }
 
@@ -24,21 +38,23 @@ type AxisAnchor = 'start' | 'middle' | 'end'
 
 type PriceChartProps = {
   prices: number[]
-  bars?: OhlcvBar[]
+  bars?: ChartBar[]
   currentTick: number
-  lastWhaleOrder?: LiveWhaleOrderOutcome | null
   mode?: ChartMode
+  tickIntervalMs?: number
+  referenceTimeMs?: number
 }
 
-const MAX_VISIBLE_POINTS = 80
-const CANDLE_GROUP_SIZE = 4
+const MAX_VISIBLE_POINTS = 620
 const SVG_WIDTH = 960
-const SVG_HEIGHT = 320
+const SVG_HEIGHT = 392
 const MIN_CANDLE_BODY_HEIGHT = 3
+const VOLUME_HEIGHT = 66
+const VOLUME_GAP = 14
 const CHART_PADDING = {
   top: 24,
-  right: 84,
-  bottom: 36,
+  right: 104,
+  bottom: 34,
   left: 20,
 }
 
@@ -46,30 +62,33 @@ export function PriceChart({
   prices,
   bars = [],
   currentTick,
-  lastWhaleOrder = null,
   mode = 'candles',
+  tickIntervalMs = 750,
+  referenceTimeMs = 0,
 }: PriceChartProps) {
   const visiblePrices = prices.slice(-MAX_VISIBLE_POINTS)
   const visibleBars = bars.slice(-MAX_VISIBLE_POINTS)
-  const hasAuthoritativeCandles = visibleBars.length >= 2
+  const hasChartBars = visibleBars.length > 0
   const fallbackStartTick = Math.max(currentTick - visiblePrices.length + 1, 0)
-  const fallbackCandles = buildCandles(visiblePrices, fallbackStartTick, CANDLE_GROUP_SIZE)
-  const candles = hasAuthoritativeCandles
+  const fallbackCandles = buildCandles(visiblePrices, fallbackStartTick, 1)
+  const candles = hasChartBars
     ? visibleBars.map((bar) => ({
-        tickStart: bar.tick,
-        tickEnd: bar.tick,
+        tickStart: bar.tickStart,
+        tickEnd: bar.tickEnd,
         open: bar.open,
         high: bar.high,
         low: bar.low,
         close: bar.close,
         volume: bar.volume,
         trades: bar.trades,
-        source: 'backend' as const,
+        whaleSide: bar.whaleSide,
+        whaleImpactBps: bar.whaleImpactBps,
+        source: bar.source,
       }))
     : fallbackCandles
   const hasFallbackLine = visiblePrices.length >= 2
 
-  if (!hasAuthoritativeCandles && !hasFallbackLine) {
+  if (!hasChartBars && !hasFallbackLine) {
     return (
       <div className="price-chart__empty" role="img" aria-label="Grafica pendiente de datos">
         <p className="price-chart__message">
@@ -81,9 +100,11 @@ export function PriceChart({
   }
 
   const shouldUseCandles = mode === 'candles' && candles.length >= 2
-  const volumeAvailable = hasAuthoritativeCandles
   const drawableWidth = SVG_WIDTH - CHART_PADDING.left - CHART_PADDING.right
   const drawableHeight = SVG_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom
+  const priceDrawableHeight = drawableHeight - VOLUME_HEIGHT - VOLUME_GAP
+  const volumeTopY = CHART_PADDING.top + priceDrawableHeight + VOLUME_GAP
+  const volumeBaseY = volumeTopY + VOLUME_HEIGHT
   const priceSamples = shouldUseCandles
     ? candles.flatMap((candle) => [candle.open, candle.high, candle.low, candle.close])
     : visiblePrices
@@ -94,10 +115,10 @@ export function PriceChart({
   const chartMin = minPrice - rangePadding
   const chartMax = maxPrice + rangePadding
   const chartRange = Math.max(chartMax - chartMin, 0.0001)
-  const baselineY = CHART_PADDING.top + drawableHeight
+  const baselineY = CHART_PADDING.top + priceDrawableHeight
   const points: ChartPoint[] = visiblePrices.map((price, index) => ({
     x: CHART_PADDING.left + (drawableWidth * index) / Math.max(visiblePrices.length - 1, 1),
-    y: toChartY(price, chartMin, chartRange, drawableHeight),
+    y: toChartY(price, chartMin, chartRange, priceDrawableHeight),
     tick: fallbackStartTick + index,
   }))
   const polylinePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
@@ -113,55 +134,26 @@ export function PriceChart({
   const fallbackCurrentPrice = visiblePrices[visiblePrices.length - 1] ?? 0
   const lastPoint = points[points.length - 1] ?? {
     x: CHART_PADDING.left,
-    y: toChartY(fallbackCurrentPrice, chartMin, chartRange, drawableHeight),
+    y: toChartY(fallbackCurrentPrice, chartMin, chartRange, priceDrawableHeight),
     tick: currentTick,
   }
   const lastCandle = candles[candles.length - 1] ?? null
-  const currentMarker = shouldUseCandles && lastCandle
+  const currentMarker = (mode === 'candles' && lastCandle)
     ? {
         x: getCandleCenterX(candles.length - 1, candles.length, drawableWidth),
-        y: toChartY(lastCandle.close, chartMin, chartRange, drawableHeight),
+        y: toChartY(lastCandle.close, chartMin, chartRange, priceDrawableHeight),
       }
     : {
         x: lastPoint.x,
         y: lastPoint.y,
       }
-  const currentPriceValue = shouldUseCandles && lastCandle ? lastCandle.close : fallbackCurrentPrice
+  const currentPriceValue = lastCandle ? lastCandle.close : fallbackCurrentPrice
   const currentPriceLabel = `$${currentPriceValue.toFixed(2)}`
   const candleWidth = shouldUseCandles ? (drawableWidth / Math.max(candles.length, 1)) * 0.56 : 0
-  const eventTone = lastWhaleOrder?.side ?? 'buy'
-  const eventPoint = lastWhaleOrder
-    ? shouldUseCandles
-      ? resolveCandleEventPoint(candles, lastWhaleOrder.tick, drawableWidth, drawableHeight, chartMin, chartRange)
-      : points.find((point) => point.tick === lastWhaleOrder.tick) ?? null
-    : null
-  const eventLabelWidth = 152
-  const eventLabelHeight = 42
-  const eventLabelX = eventPoint
-    ? Math.min(Math.max(eventPoint.x + 12, 16), SVG_WIDTH - eventLabelWidth - 16)
-    : 0
-  const eventLabelY = eventPoint
-    ? Math.max(eventPoint.y - eventLabelHeight - 12, 12)
-    : 0
-  const impactSummary = lastWhaleOrder
-    ? `${lastWhaleOrder.side.toUpperCase()} ${lastWhaleOrder.price_impact_bps >= 0 ? '+' : ''}${lastWhaleOrder.price_impact_bps.toFixed(2)} bps`
-    : 'Sin impacto reciente'
-  const chartSourceSummary = hasAuthoritativeCandles ? 'OHLCV real' : 'Velas agrupadas'
-  const chartModeSummary = hasAuthoritativeCandles
-    ? 'OHLCV real por tick'
-    : shouldUseCandles
-      ? `Velas agrupadas cada ${CANDLE_GROUP_SIZE} muestras`
-    : 'Linea simple por muestra'
-  const chartStatusSummary = shouldUseCandles
-    ? `${candles.length} velas visibles`
-    : `${visiblePrices.length} muestras visibles`
-  const chartWindowStartTick = shouldUseCandles && candles.length > 0 ? candles[0].tickStart : fallbackStartTick
-  const chartWindowEndTick = shouldUseCandles && candles.length > 0
-    ? candles[candles.length - 1].tickEnd
-    : currentTick
+  const volumeBars = buildVolumeBars(candles, drawableWidth, candleWidth, volumeTopY, volumeBaseY)
   const guideLines = Array.from({ length: 4 }, (_, index) => {
     const ratio = index / 3
-    const y = CHART_PADDING.top + drawableHeight * ratio
+    const y = CHART_PADDING.top + priceDrawableHeight * ratio
     const value = chartMax - chartRange * ratio
 
     return {
@@ -169,15 +161,15 @@ export function PriceChart({
       value,
     }
   })
-  const tickLabels = shouldUseCandles
-    ? buildCandleTickLabels(candles, drawableWidth)
+  const tickLabels = candles.length > 0
+    ? buildCandleTimeLabels(candles, drawableWidth, currentTick, tickIntervalMs, referenceTimeMs)
     : Array.from(
         new Set([fallbackStartTick, Math.round((fallbackStartTick + currentTick) / 2), currentTick]),
       ).map((tickValue) => {
         const tickRatio = (tickValue - fallbackStartTick) / Math.max(visiblePrices.length - 1, 1)
 
         return {
-          tickValue,
+          tickValue: formatTickClock(tickValue, currentTick, tickIntervalMs, referenceTimeMs),
           x: CHART_PADDING.left + drawableWidth * tickRatio,
           textAnchor: (tickValue === fallbackStartTick ? 'start' : tickValue === currentTick ? 'end' : 'middle') as AxisAnchor,
         }
@@ -222,10 +214,10 @@ export function PriceChart({
           {shouldUseCandles ? (
             candles.map((candle, index) => {
               const centerX = getCandleCenterX(index, candles.length, drawableWidth)
-              const wickTopY = toChartY(candle.high, chartMin, chartRange, drawableHeight)
-              const wickBottomY = toChartY(candle.low, chartMin, chartRange, drawableHeight)
-              const openY = toChartY(candle.open, chartMin, chartRange, drawableHeight)
-              const closeY = toChartY(candle.close, chartMin, chartRange, drawableHeight)
+              const wickTopY = toChartY(candle.high, chartMin, chartRange, priceDrawableHeight)
+              const wickBottomY = toChartY(candle.low, chartMin, chartRange, priceDrawableHeight)
+              const openY = toChartY(candle.open, chartMin, chartRange, priceDrawableHeight)
+              const closeY = toChartY(candle.close, chartMin, chartRange, priceDrawableHeight)
               const rawBodyHeight = Math.abs(openY - closeY)
               const bodyHeight = Math.max(rawBodyHeight, MIN_CANDLE_BODY_HEIGHT)
               const bodyTopY = rawBodyHeight < MIN_CANDLE_BODY_HEIGHT
@@ -261,38 +253,26 @@ export function PriceChart({
             </>
           )}
 
-          {eventPoint && lastWhaleOrder ? (
+          {volumeBars.length > 0 ? (
             <>
               <line
-                className={`price-chart__event-line price-chart__event-line--${eventTone}`}
-                x1={eventPoint.x}
-                x2={eventPoint.x}
-                y1={CHART_PADDING.top}
-                y2={baselineY}
+                className="price-chart__volume-baseline"
+                x1={CHART_PADDING.left}
+                x2={SVG_WIDTH - CHART_PADDING.right + 6}
+                y1={volumeBaseY}
+                y2={volumeBaseY}
               />
-              <circle
-                className={`price-chart__event-dot price-chart__event-dot--${eventTone}`}
-                cx={eventPoint.x}
-                cy={eventPoint.y}
-                r="5"
-              />
-              <g transform={`translate(${eventLabelX}, ${eventLabelY})`}>
+              {volumeBars.map((bar) => (
                 <rect
-                  className={`price-chart__event-label price-chart__event-label--${eventTone}`}
-                  height={eventLabelHeight}
-                  rx="10"
-                  width={eventLabelWidth}
-                  x="0"
-                  y="0"
+                  key={`${bar.tickStart}-${bar.tickEnd}`}
+                  className={`price-chart__volume-bar price-chart__volume-bar--${bar.tone}`}
+                  height={bar.height}
+                  rx="2"
+                  width={bar.width}
+                  x={bar.x}
+                  y={bar.y}
                 />
-                <text className="price-chart__event-text" x="12" y="18">
-                  {lastWhaleOrder.side.toUpperCase()} {lastWhaleOrder.price_impact_bps >= 0 ? '+' : ''}
-                  {lastWhaleOrder.price_impact_bps.toFixed(2)} bps
-                </text>
-                <text className="price-chart__event-subtext" x="12" y="31">
-                  T{lastWhaleOrder.tick} · {lastWhaleOrder.impact_label}
-                </text>
-              </g>
+              ))}
             </>
           ) : null}
 
@@ -319,59 +299,12 @@ export function PriceChart({
               x={label.x}
               y={SVG_HEIGHT - 8}
             >
-              T{label.tickValue}
+              {label.tickValue}
             </text>
           ))}
         </svg>
       </div>
 
-      <div className="price-chart__legend">
-        <span>
-          Ventana visible <strong>T{chartWindowStartTick}</strong> a <strong>T{chartWindowEndTick}</strong>
-        </span>
-        <span>
-          Fuente <strong>{chartSourceSummary}</strong>
-        </span>
-        <span>
-          {chartModeSummary} <strong>{chartStatusSummary}</strong>
-        </span>
-        <span>
-          Ultimo impacto <strong>{impactSummary}</strong>
-        </span>
-        <span>
-          Volumen <strong>{volumeAvailable ? 'real' : 'pendiente'}</strong>
-        </span>
-      </div>
-
-      {shouldUseCandles && lastCandle ? (
-        <div className="price-chart__ohlc-strip">
-          <span>
-            O <strong>{lastCandle.open.toFixed(2)}</strong>
-          </span>
-          <span>
-            H <strong>{lastCandle.high.toFixed(2)}</strong>
-          </span>
-          <span>
-            L <strong>{lastCandle.low.toFixed(2)}</strong>
-          </span>
-          <span>
-            C <strong>{lastCandle.close.toFixed(2)}</strong>
-          </span>
-          {lastCandle.source === 'backend' ? (
-            <span>
-              V <strong>{(lastCandle.volume ?? 0).toFixed(4)}</strong>
-            </span>
-          ) : null}
-          {lastCandle.source === 'backend' ? (
-            <span>
-              Trades <strong>{lastCandle.trades ?? 0}</strong>
-            </span>
-          ) : null}
-          <span>
-            Rango <strong>T{lastCandle.tickStart} a T{lastCandle.tickEnd}</strong>
-          </span>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -394,6 +327,8 @@ function buildCandles(prices: number[], startTick: number, groupSize: number): C
       close: group[group.length - 1],
       volume: null,
       trades: null,
+      whaleSide: null,
+      whaleImpactBps: null,
       source: 'grouped',
     })
   }
@@ -401,19 +336,30 @@ function buildCandles(prices: number[], startTick: number, groupSize: number): C
   return candles
 }
 
-function buildCandleTickLabels(candles: CandleDatum[], drawableWidth: number) {
+function buildCandleTimeLabels(
+  candles: CandleDatum[],
+  drawableWidth: number,
+  currentTick: number,
+  tickIntervalMs: number,
+  referenceTimeMs: number,
+) {
   const candidateIndices = [0, Math.floor((candles.length - 1) / 2), candles.length - 1]
-  const seenTicks = new Set<number>()
+  const seenTimes = new Set<string>()
 
   return candidateIndices.flatMap((index) => {
     const candle = candles[index]
-    if (!candle || seenTicks.has(candle.tickEnd)) {
+    if (!candle) {
       return []
     }
 
-    seenTicks.add(candle.tickEnd)
+    const timeLabel = formatTickClock(candle.tickEnd, currentTick, tickIntervalMs, referenceTimeMs)
+    if (seenTimes.has(timeLabel)) {
+      return []
+    }
+
+    seenTimes.add(timeLabel)
     return {
-      tickValue: candle.tickEnd,
+      tickValue: timeLabel,
       x: getCandleCenterX(index, candles.length, drawableWidth),
       textAnchor: (index === 0 ? 'start' : index === candles.length - 1 ? 'end' : 'middle') as AxisAnchor,
     }
@@ -428,23 +374,45 @@ function toChartY(price: number, chartMin: number, chartRange: number, drawableH
   return CHART_PADDING.top + drawableHeight - ((price - chartMin) / chartRange) * drawableHeight
 }
 
-function resolveCandleEventPoint(
+function buildVolumeBars(
   candles: CandleDatum[],
-  tick: number,
   drawableWidth: number,
-  drawableHeight: number,
-  chartMin: number,
-  chartRange: number,
+  candleWidth: number,
+  volumeTopY: number,
+  volumeBaseY: number,
 ) {
-  const candleIndex = candles.findIndex((candle) => tick >= candle.tickStart && tick <= candle.tickEnd)
-  if (candleIndex === -1) {
-    return null
+  const volumes = candles.map((candle) => candle.volume ?? 0)
+  const maxVolume = Math.max(...volumes, 0)
+  if (maxVolume <= 0) {
+    return []
   }
 
-  const candle = candles[candleIndex]
+  return candles.map((candle, index) => {
+    const centerX = getCandleCenterX(index, candles.length, drawableWidth)
+    const height = Math.max(((candle.volume ?? 0) / maxVolume) * (volumeBaseY - volumeTopY), 2)
+    const tone = candle.close >= candle.open ? 'buy' : 'sell'
+    const width = Math.max(candleWidth, 6)
 
-  return {
-    x: getCandleCenterX(candleIndex, candles.length, drawableWidth),
-    y: toChartY(candle.close, chartMin, chartRange, drawableHeight),
-  }
+    return {
+      tickStart: candle.tickStart,
+      tickEnd: candle.tickEnd,
+      x: centerX - width / 2,
+      y: volumeBaseY - height,
+      width,
+      height,
+      tone,
+    }
+  })
 }
+
+function formatTickClock(tick: number, currentTick: number, tickIntervalMs: number, referenceTimeMs: number) {
+  const tickDistance = Math.max(currentTick - tick, 0)
+  const tickTimeMs = referenceTimeMs - tickDistance * Math.max(tickIntervalMs, 1)
+
+  return new Intl.DateTimeFormat('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(tickTimeMs))
+}
+
