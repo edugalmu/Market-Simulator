@@ -94,8 +94,10 @@ class IcebergSummary(BaseModel):
     bid_count: int
     ask_count: int
     recent_absorbed_notional: float
+    last_absorbed_notional: float = 0.0
     last_absorption_price: float | None = None
     last_absorption_side: str | None = None
+    ticks_since_absorption: int | None = None
 
 
 class OhlcvBar(BaseModel):

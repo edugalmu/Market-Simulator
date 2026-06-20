@@ -99,8 +99,10 @@ export type IcebergSummary = {
   bid_count: number
   ask_count: number
   recent_absorbed_notional: number
+  last_absorbed_notional: number
   last_absorption_price: number | null
   last_absorption_side: string | null
+  ticks_since_absorption: number | null
 }
 
 export type OhlcvBar = {

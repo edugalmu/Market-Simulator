@@ -527,12 +527,20 @@ function App() {
                       <strong>{liveIcebergs ? formatCurrency(liveIcebergs.recent_absorbed_notional) : '--'}</strong>
                     </div>
                     <div className="regime-card__item">
+                      <span>Último absorbido</span>
+                      <strong>{liveIcebergs ? formatCurrency(liveIcebergs.last_absorbed_notional) : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
                       <span>Último nivel</span>
                       <strong>
                         {liveIcebergs && liveIcebergs.last_absorption_price !== null && liveIcebergs.last_absorption_side
                           ? `${formatCurrency(liveIcebergs.last_absorption_price)} ${liveIcebergs.last_absorption_side.toUpperCase()}`
                           : '--'}
                       </strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Ticks desde absorción</span>
+                      <strong>{liveIcebergs?.ticks_since_absorption ?? '--'}</strong>
                     </div>
                   </div>
                 </section>

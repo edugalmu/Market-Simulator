@@ -278,6 +278,9 @@ def test_order_book_preserves_some_orders_between_ticks() -> None:
     service.start(SessionConfig(seed=44), gpu_enabled=False, auto_run=False)
     session = service._session
     assert session is not None
+    session.profiles = []
+    session.runtime_state = {}
+    session.rival_whales = []
 
     order_id = session.order_book.add_limit_order(
         side=OrderSide.BUY,
@@ -477,6 +480,39 @@ def test_iceberg_prevents_price_traversal_until_hidden_is_exhausted() -> None:
     assert order_book.best_ask == 101.0
 
 
+def test_bid_iceberg_breaks_after_hidden_is_exhausted() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.BUY,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=20.0,
+        replenish_quantity=10.0,
+        agent_id=204,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+    order_book.add_limit_order(
+        side=OrderSide.BUY,
+        price=99.0,
+        quantity=12.0,
+        agent_id=205,
+        strategy_type="normal",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    first = execute_market_order(order_book, side=OrderSide.SELL, quantity=25.0)
+    assert first.quantity_matched == 25.0
+    assert order_book.best_bid == 100.0
+
+    second = execute_market_order(order_book, side=OrderSide.SELL, quantity=10.0)
+    assert second.quantity_matched == 10.0
+    assert order_book.best_bid == 99.0
+    assert all(not order.is_iceberg for order in order_book.bid_orders)
+
+
 def test_iceberg_does_not_leave_negative_quantities() -> None:
     order_book = OrderBook()
     order_book.add_iceberg_order(
@@ -504,6 +540,11 @@ def test_live_snapshot_includes_iceberg_summary() -> None:
     assert snapshot.icebergs.active >= 0
     assert snapshot.icebergs.bid_count >= 0
     assert snapshot.icebergs.ask_count >= 0
+    assert snapshot.icebergs.recent_absorbed_notional == 0
+    assert snapshot.icebergs.last_absorbed_notional == 0
+    assert snapshot.icebergs.last_absorption_price is None
+    assert snapshot.icebergs.last_absorption_side is None
+    assert snapshot.icebergs.ticks_since_absorption is None
 
 
 def test_contextual_iceberg_spawn_respects_max_active_limit() -> None:
@@ -523,7 +564,7 @@ def test_contextual_iceberg_spawn_respects_max_active_limit() -> None:
     snapshot = service.get_snapshot(raise_if_missing=True)
     service.reset()
 
-    assert snapshot.icebergs.active <= 6
+    assert snapshot.icebergs.active <= 5
 
 
 def test_contextual_iceberg_spawn_can_happen_in_accumulation() -> None:
@@ -551,18 +592,42 @@ def test_post_whale_defensive_iceberg_can_spawn() -> None:
     session = service._session
     assert session is not None
 
-    session.market_regime.name = "post_whale_consolidation"
-    created = service._maybe_spawn_contextual_iceberg_locked(
+    best_bid_before = session.order_book.best_bid or session.last_price
+    created = service._maybe_stage_whale_defensive_iceberg_locked(
         session,
-        reference_price=session.last_price,
-        preferred_side=OrderSide.BUY,
+        side=OrderSide.SELL,
+        notional=25_000.0,
         force_spawn=True,
     )
+    nearest_bid = max((order.price for order in session.order_book.bid_orders if order.is_iceberg), default=0.0)
     snapshot = service.get_snapshot(raise_if_missing=True)
     service.reset()
 
     assert created is True
     assert snapshot.icebergs.bid_count >= 1
+    assert nearest_bid <= best_bid_before
+    assert ((session.last_price - nearest_bid) / session.last_price) * 10_000 <= 70
+
+
+def test_force_spawn_iceberg_near_price_stays_close_to_market() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=96), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    reference_price = session.last_price
+    created = service._force_spawn_iceberg_near_price_locked(
+        session,
+        side=OrderSide.SELL,
+        distance_ticks=1,
+        reference_price=reference_price,
+    )
+    nearest_ask = min((order.price for order in session.order_book.ask_orders if order.is_iceberg), default=0.0)
+    service.reset()
+
+    assert created is True
+    assert nearest_ask >= reference_price
+    assert ((nearest_ask - reference_price) / reference_price) * 10_000 <= 70
 
 
 def test_iceberg_absorption_updates_recent_summary() -> None:
@@ -588,8 +653,54 @@ def test_iceberg_absorption_updates_recent_summary() -> None:
     service.reset()
 
     assert snapshot.icebergs.recent_absorbed_notional > 0
+    assert snapshot.icebergs.last_absorbed_notional > 0
     assert snapshot.icebergs.last_absorption_price is not None
     assert snapshot.icebergs.last_absorption_side == "ask"
+    assert snapshot.icebergs.ticks_since_absorption == 0
+
+
+def test_large_whale_buy_can_hit_defensive_iceberg_with_seeded_rng() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=97), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    session.rng.seed(1)
+    response = service.execute_whale_order(side="buy", notional=25_000.0)
+    service.reset()
+
+    assert response.snapshot.icebergs.recent_absorbed_notional > 0
+    assert response.snapshot.icebergs.last_absorbed_notional > 0
+    assert response.snapshot.icebergs.last_absorption_side == "ask"
+    assert response.snapshot.icebergs.ticks_since_absorption == 0
+
+
+def test_large_whale_sell_can_absorb_forced_bid_iceberg_near_best_bid() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=98), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    created = service._force_spawn_iceberg_near_price_locked(
+        session,
+        side=OrderSide.BUY,
+        distance_ticks=1,
+        reference_price=session.order_book.best_bid or session.last_price,
+        hidden_scale=0.8,
+    )
+    response = service.execute_whale_order(side="sell", notional=25_000.0)
+    current_orders = session.order_book.bid_orders + session.order_book.ask_orders
+    service.reset()
+
+    assert created is True
+    assert response.snapshot.icebergs.recent_absorbed_notional > 0
+    assert response.snapshot.icebergs.last_absorbed_notional > 0
+    assert response.snapshot.icebergs.last_absorption_side == "bid"
+    assert response.snapshot.icebergs.last_absorption_price is not None
+    assert response.snapshot.icebergs.ticks_since_absorption == 0
+    assert response.snapshot.order_book.best_bid <= response.snapshot.order_book.best_ask
+    assert len(response.snapshot.ohlcv_history) > 0
+    assert all(order.quantity >= 0 and order.hidden_quantity >= 0 for order in current_orders)
 
 
 def test_live_session_whale_starts_with_one_fifth_of_total_capital() -> None:

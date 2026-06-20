@@ -307,7 +307,8 @@ Campos principales:
 - `whale_balance.initial_cash`, `initial_asset`, `initial_mark_price` e `initial_total_equity`: baseline inicial de la ballena para P&L y reparto de capital.
 - `top_agents`: ranking resumido de los diez agentes con mayor equity actual, pensado para la UI DEV.
 - `market_regime`: estado de régimen activo con sesgos, multiplicadores, probabilidad de gaps y `reason` para explicar transiciones o shocks.
-- `icebergs`: resumen de liquidez oculta con `active`, `bid_count`, `ask_count`, `recent_absorbed_notional`, `last_absorption_price` y `last_absorption_side`.
+- `icebergs`: resumen de liquidez oculta con `active`, `bid_count`, `ask_count`, `recent_absorbed_notional`, `last_absorbed_notional`, `last_absorption_price`, `last_absorption_side` y `ticks_since_absorption`.
+- `icebergs.last_absorption_side`: lado del libro que absorbio la orden agresiva. Una `Whale Buy` que choca con liquidez oculta superior reporta `ask`; una `Whale Sell` que choca con liquidez oculta inferior reporta `bid`.
 - `game`: estado del reto local actual con `mode`, `status`, `duration_ticks`, `remaining_ticks`, `score`, `score_breakdown` y `final_result` cuando aplique.
 
 Ejemplo parcial del bloque `icebergs`:
@@ -319,8 +320,10 @@ Ejemplo parcial del bloque `icebergs`:
     "bid_count": 1,
     "ask_count": 1,
     "recent_absorbed_notional": 12500.0,
+    "last_absorbed_notional": 8200.0,
     "last_absorption_price": 70.0,
-    "last_absorption_side": "ask"
+    "last_absorption_side": "ask",
+    "ticks_since_absorption": 0
   }
 }
 ```

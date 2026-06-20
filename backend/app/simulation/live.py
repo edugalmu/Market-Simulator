@@ -61,21 +61,29 @@ PANIC_PRICE_CHANGE_BPS = -120.0
 SHORT_SQUEEZE_PRICE_CHANGE_BPS = 120.0
 ICEBERG_ENABLED = True
 ICEBERG_SPAWN_PROBABILITY = 0.03
-ICEBERG_POST_WHALE_PROBABILITY = 0.20
-ICEBERG_DISPLAY_NOTIONAL = (5_000, 15_000)
-ICEBERG_HIDDEN_NOTIONAL = (50_000, 150_000)
-ICEBERG_TTL_TICKS = (30, 120)
-ICEBERG_MAX_ACTIVE = 6
+ICEBERG_POST_WHALE_PROBABILITY = 0.35
+ICEBERG_DISPLAY_NOTIONAL = (4_000, 12_000)
+ICEBERG_HIDDEN_NOTIONAL = (35_000, 90_000)
+ICEBERG_TTL_TICKS = (24, 72)
+ICEBERG_MAX_ACTIVE = 5
 ICEBERG_ROUND_PRICE_INTERVAL = 5.0
+ICEBERG_NEAR_DISTANCE_LEVELS = 3
+ICEBERG_WHALE_DISTANCE_LEVELS = 1
+ICEBERG_WHALE_BUY_DEFENSE_PROBABILITY = 0.35
+ICEBERG_WHALE_SELL_DEFENSE_PROBABILITY = 0.45
+ICEBERG_WHALE_BUY_DEFENSE_DISTANCE_RANGE = (0, 1)
+ICEBERG_WHALE_SELL_DEFENSE_DISTANCE_RANGE = (0, 3)
+ICEBERG_RECENT_LOOKBACK_BARS = 8
+ICEBERG_MAX_ROUND_DISTANCE_BPS = 70.0
 ICEBERG_REGIME_MULTIPLIERS = {
-    "accumulation": 1.5,
-    "distribution": 1.5,
-    "post_whale_consolidation": 2.0,
-    "neutral": 0.5,
-    "uptrend": 0.7,
-    "downtrend": 0.7,
-    "panic": 0.3,
-    "short_squeeze": 0.3,
+    "accumulation": 1.8,
+    "distribution": 1.8,
+    "post_whale_consolidation": 2.4,
+    "neutral": 0.35,
+    "uptrend": 0.65,
+    "downtrend": 0.65,
+    "panic": 0.25,
+    "short_squeeze": 0.25,
 }
 
 REGIME_PARAMS: dict[str, dict[str, float | tuple[int, int]]] = {
@@ -299,6 +307,7 @@ class LiveSessionState:
     whale_mood: WhaleMoodState
     market_regime: RegimeRuntimeState
     iceberg_recent_absorbed_notional: float
+    iceberg_last_absorbed_notional: float
     iceberg_last_absorption_price: float | None
     iceberg_last_absorption_side: str | None
     iceberg_last_absorption_tick: int | None
@@ -395,6 +404,7 @@ class LiveSimulationService:
             whale_mood=whale_mood,
             market_regime=market_regime,
             iceberg_recent_absorbed_notional=0.0,
+            iceberg_last_absorbed_notional=0.0,
             iceberg_last_absorption_price=None,
             iceberg_last_absorption_side=None,
             iceberg_last_absorption_tick=None,
@@ -654,6 +664,7 @@ class LiveSimulationService:
             len(session.profiles),
             activation_ratio=0.03,
         )
+        active_count = min(active_count, len(session.profiles))
         sampled_profiles = session.rng.sample(session.profiles, k=active_count)
 
         active_agents = 0
@@ -787,6 +798,7 @@ class LiveSimulationService:
         price_before = session.last_price
         observed_prices = [price_before]
         whale_balance_before = session.whale_ledger.get_balance(WHALE_AGENT_ID)
+        self._maybe_stage_whale_defensive_iceberg_locked(session, side=side, notional=notional)
 
         if side == OrderSide.BUY:
             if notional > whale_balance_before.cash_free:
@@ -828,6 +840,9 @@ class LiveSimulationService:
                 quantity_matched=sell_result.quantity_matched,
                 quantity_remaining=sell_result.quantity_remaining,
                 average_fill_price=sell_result.average_fill_price,
+                iceberg_absorbed_notional=sell_result.iceberg_absorbed_notional,
+                last_absorption_price=sell_result.last_absorption_price,
+                last_absorption_side=sell_result.last_absorption_side,
             )
             session.whale_ledger.apply_sell_fill(
                 WHALE_AGENT_ID,
@@ -916,7 +931,6 @@ class LiveSimulationService:
             matched_notional=result.matched_notional,
         )
         self._record_iceberg_absorption_locked(session, result)
-        self._maybe_spawn_post_whale_iceberg_locked(session, side=side)
         self._update_game_state_locked(session)
 
         whale_balance = self._build_whale_balance_snapshot(session)
@@ -1040,6 +1054,7 @@ class LiveSimulationService:
             session.iceberg_recent_absorbed_notional * 0.45 + match_result.iceberg_absorbed_notional,
             6,
         )
+        session.iceberg_last_absorbed_notional = round(match_result.iceberg_absorbed_notional, 6)
         session.iceberg_last_absorption_price = match_result.last_absorption_price
         session.iceberg_last_absorption_side = match_result.last_absorption_side
         session.iceberg_last_absorption_tick = session.tick
@@ -1065,12 +1080,40 @@ class LiveSimulationService:
             return False
 
         side = preferred_side or _pick_iceberg_side(session)
-        iceberg_price = _build_iceberg_price(reference_price=reference_price, side=side)
+        distance_levels = (
+            ICEBERG_WHALE_DISTANCE_LEVELS
+            if session.market_regime.name == "post_whale_consolidation"
+            else ICEBERG_NEAR_DISTANCE_LEVELS
+        )
+        iceberg_price = _build_iceberg_price(
+            session=session,
+            reference_price=reference_price,
+            side=side,
+            distance_levels=distance_levels,
+        )
+        return self._spawn_iceberg_locked(
+            session,
+            side=side,
+            price=iceberg_price,
+            active_count=active_count,
+        )
+
+    def _spawn_iceberg_locked(
+        self,
+        session: LiveSessionState,
+        *,
+        side: OrderSide,
+        price: float,
+        active_count: int,
+        hidden_scale: float = 1.0,
+        display_scale: float = 1.0,
+    ) -> bool:
         display_notional = session.rng.uniform(*ICEBERG_DISPLAY_NOTIONAL)
-        hidden_notional = session.rng.uniform(*ICEBERG_HIDDEN_NOTIONAL)
-        replenish_notional = max(display_notional, hidden_notional * 0.15)
+        hidden_notional = session.rng.uniform(*ICEBERG_HIDDEN_NOTIONAL) * hidden_scale
+        display_notional *= display_scale
+        replenish_notional = max(display_notional, hidden_notional * 0.18)
         ttl_ticks = session.rng.randint(*ICEBERG_TTL_TICKS)
-        price = max(iceberg_price, 0.01)
+        price = max(price, 0.01)
 
         order_id = session.order_book.add_iceberg_order(
             side=side,
@@ -1085,6 +1128,70 @@ class LiveSimulationService:
         )
 
         return order_id is not None
+
+    def _force_spawn_iceberg_near_price_locked(
+        self,
+        session: LiveSessionState,
+        *,
+        side: OrderSide,
+        distance_ticks: int = 2,
+        reference_price: float | None = None,
+        hidden_scale: float = 1.0,
+        display_scale: float = 1.0,
+    ) -> bool:
+        active_count = sum(1 for order in session.order_book.bid_orders + session.order_book.ask_orders if order.is_iceberg)
+        if active_count >= ICEBERG_MAX_ACTIVE:
+            return False
+
+        anchor_price = reference_price or session.last_price
+        iceberg_price = _build_iceberg_price(
+            session=session,
+            reference_price=anchor_price,
+            side=side,
+            distance_levels=max(distance_ticks, 1),
+        )
+        return self._spawn_iceberg_locked(
+            session,
+            side=side,
+            price=iceberg_price,
+            active_count=active_count,
+            hidden_scale=hidden_scale,
+            display_scale=display_scale,
+        )
+
+    def _maybe_stage_whale_defensive_iceberg_locked(
+        self,
+        session: LiveSessionState,
+        *,
+        side: OrderSide,
+        notional: float,
+        force_spawn: bool = False,
+    ) -> bool:
+        if not ICEBERG_ENABLED or notional < 10_000:
+            return False
+        if side == OrderSide.BUY:
+            defensive_side = OrderSide.SELL
+            spawn_probability = ICEBERG_WHALE_BUY_DEFENSE_PROBABILITY
+            distance_range = ICEBERG_WHALE_BUY_DEFENSE_DISTANCE_RANGE
+        else:
+            defensive_side = OrderSide.BUY
+            spawn_probability = ICEBERG_WHALE_SELL_DEFENSE_PROBABILITY
+            distance_range = ICEBERG_WHALE_SELL_DEFENSE_DISTANCE_RANGE
+
+        if not force_spawn and session.rng.random() > spawn_probability:
+            return False
+
+        hidden_scale = 1.0 + min(notional / 90_000, 0.55)
+        display_scale = 1.0 + min(notional / 150_000, 0.2)
+        distance_ticks = session.rng.randint(distance_range[0], distance_range[1]) + 1
+        return self._force_spawn_iceberg_near_price_locked(
+            session,
+            side=defensive_side,
+            distance_ticks=distance_ticks,
+            reference_price=session.last_price,
+            hidden_scale=hidden_scale,
+            display_scale=display_scale,
+        )
 
     def _maybe_spawn_post_whale_iceberg_locked(self, session: LiveSessionState, *, side: OrderSide) -> bool:
         defensive_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
@@ -1290,13 +1397,19 @@ class LiveSimulationService:
             for order in session.order_book.bid_orders + session.order_book.ask_orders
             if order.is_iceberg
         ]
+        ticks_since_absorption = None
+        if session.iceberg_last_absorption_tick is not None:
+            ticks_since_absorption = max(session.tick - session.iceberg_last_absorption_tick, 0)
+
         return IcebergSummary(
             active=len(active_icebergs),
             bid_count=sum(1 for order in session.order_book.bid_orders if order.is_iceberg),
             ask_count=sum(1 for order in session.order_book.ask_orders if order.is_iceberg),
             recent_absorbed_notional=round(session.iceberg_recent_absorbed_notional, 6),
+            last_absorbed_notional=round(session.iceberg_last_absorbed_notional, 6),
             last_absorption_price=session.iceberg_last_absorption_price,
             last_absorption_side=session.iceberg_last_absorption_side,
+            ticks_since_absorption=ticks_since_absorption,
         )
 
     def _advance_market_regime_locked(self, session: LiveSessionState) -> None:
@@ -1383,6 +1496,11 @@ class LiveSimulationService:
         )
         session.whale_mood = _build_whale_mood_state(session.rng, current_tick=session.tick)
         session.next_cash_growth_tick = session.tick + MONEY_GROWTH_INTERVAL_TICKS
+        session.iceberg_recent_absorbed_notional = 0.0
+        session.iceberg_last_absorbed_notional = 0.0
+        session.iceberg_last_absorption_price = None
+        session.iceberg_last_absorption_side = None
+        session.iceberg_last_absorption_tick = None
         session.whale_ledger = Ledger(
             {
                 WHALE_AGENT_ID: AgentBalance(
@@ -1907,7 +2025,82 @@ def _pick_iceberg_side(session: LiveSessionState) -> OrderSide:
     return OrderSide.BUY if session.rng.random() < session.market_regime.buy_bias else OrderSide.SELL
 
 
-def _build_iceberg_price(*, reference_price: float, side: OrderSide) -> float:
+def _build_iceberg_price(
+    *,
+    session: LiveSessionState,
+    reference_price: float,
+    side: OrderSide,
+    distance_levels: int,
+) -> float:
+    visible_level = _visible_iceberg_anchor_price(
+        session.order_book,
+        reference_price=reference_price,
+        side=side,
+        distance_levels=distance_levels,
+    )
+    recent_extreme = _recent_iceberg_extreme_price(
+        session,
+        reference_price=reference_price,
+        side=side,
+    )
+    rounded_level = _rounded_iceberg_level(reference_price=reference_price, side=side)
+
+    candidates = [visible_level]
+    if recent_extreme is not None:
+        candidates.append(recent_extreme)
+    if _price_distance_bps(reference_price=reference_price, candidate_price=rounded_level) <= ICEBERG_MAX_ROUND_DISTANCE_BPS:
+        candidates.append(rounded_level)
+
+    if side == OrderSide.BUY:
+        valid = [price for price in candidates if price < reference_price]
+        if not valid:
+            fallback = reference_price - max(reference_price * 0.0008, 0.02)
+            return round(max(fallback, 0.01), 2)
+        return round(max(valid), 2)
+
+    valid = [price for price in candidates if price > reference_price]
+    if not valid:
+        return round(reference_price + max(reference_price * 0.0008, 0.02), 2)
+    return round(min(valid), 2)
+
+
+def _visible_iceberg_anchor_price(
+    order_book: OrderBook,
+    *,
+    reference_price: float,
+    side: OrderSide,
+    distance_levels: int,
+) -> float:
+    levels = order_book.bids if side == OrderSide.BUY else order_book.asks
+    if levels:
+        index = min(max(distance_levels - 1, 0), len(levels) - 1)
+        return levels[index].price
+
+    offset = max(reference_price * 0.0008, 0.02) * max(distance_levels, 1)
+    if side == OrderSide.BUY:
+        return round(max(reference_price - offset, 0.01), 2)
+    return round(reference_price + offset, 2)
+
+
+def _recent_iceberg_extreme_price(
+    session: LiveSessionState,
+    *,
+    reference_price: float,
+    side: OrderSide,
+) -> float | None:
+    if not session.ohlcv_history:
+        return None
+
+    recent_bars = list(session.ohlcv_history)[-ICEBERG_RECENT_LOOKBACK_BARS:]
+    if side == OrderSide.BUY:
+        recent_low = round(min(bar.low for bar in recent_bars), 2)
+        return recent_low if recent_low < reference_price else None
+
+    recent_high = round(max(bar.high for bar in recent_bars), 2)
+    return recent_high if recent_high > reference_price else None
+
+
+def _rounded_iceberg_level(*, reference_price: float, side: OrderSide) -> float:
     rounded_level = round(reference_price / ICEBERG_ROUND_PRICE_INTERVAL) * ICEBERG_ROUND_PRICE_INTERVAL
     if side == OrderSide.BUY:
         if rounded_level > reference_price:
@@ -1917,6 +2110,12 @@ def _build_iceberg_price(*, reference_price: float, side: OrderSide) -> float:
     if rounded_level < reference_price:
         rounded_level += ICEBERG_ROUND_PRICE_INTERVAL
     return round(max(rounded_level, 0.01), 2)
+
+
+def _price_distance_bps(*, reference_price: float, candidate_price: float) -> float:
+    if reference_price <= 0:
+        return 0.0
+    return abs(candidate_price - reference_price) / reference_price * 10_000
 
 
 def _market_regime_drift_bps(session: LiveSessionState) -> float:
