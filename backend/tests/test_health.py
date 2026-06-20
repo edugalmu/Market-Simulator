@@ -128,3 +128,19 @@ def test_live_game_endpoints() -> None:
     assert reset_response.json()["game"]["final_result"] is None
 
     live_service.reset()
+
+
+def test_live_snapshot_order_book_levels_include_order_counts() -> None:
+    live_service = get_live_simulation_service()
+    live_service.reset()
+
+    start_response = client.post("/api/v1/simulation/live/start?tick_interval_ms=750")
+    assert start_response.status_code == 200
+    payload = start_response.json()
+
+    assert payload["order_book"]["bids"]
+    assert payload["order_book"]["asks"]
+    assert payload["order_book"]["bids"][0]["orders"] >= 1
+    assert payload["order_book"]["asks"][0]["orders"] >= 1
+
+    live_service.reset()

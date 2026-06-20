@@ -188,6 +188,21 @@ def test_live_game_challenge_tracks_countdown_score_and_final_result() -> None:
     assert reset.game.remaining_ticks == 60
 
 
+def test_live_snapshot_exposes_aggregated_order_book_levels() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=41), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    assert snapshot.order_book.bids
+    assert snapshot.order_book.asks
+    assert len(snapshot.order_book.bids) <= 10
+    assert len(snapshot.order_book.asks) <= 10
+    assert snapshot.order_book.bids[0].price <= snapshot.order_book.best_bid
+    assert snapshot.order_book.asks[0].price >= snapshot.order_book.best_ask
+    assert all(level.orders >= 1 for level in snapshot.order_book.bids)
+    assert all(level.orders >= 1 for level in snapshot.order_book.asks)
+
+
 def test_live_whale_order_is_deterministic_for_same_seed() -> None:
     service_a = LiveSimulationService()
     service_b = LiveSimulationService()

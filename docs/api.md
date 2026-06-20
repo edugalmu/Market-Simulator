@@ -96,8 +96,8 @@ Respuesta resumida:
     "spread_bps": 20.0,
     "bid_depth": 124.8,
     "ask_depth": 124.8,
-    "bids": [],
-    "asks": []
+    "bids": [{ "price": 99.9, "quantity": 12.0, "orders": 5 }],
+    "asks": [{ "price": 100.1, "quantity": 12.0, "orders": 5 }]
   },
   "metrics": {
     "market_cap": 125000.0,
@@ -109,7 +109,7 @@ Respuesta resumida:
 }
 ```
 
-La lista `agent_mix` contiene todas las estrategias del mix calculado. Las listas `bids` y `asks` contienen hasta cinco niveles por lado en la respuesta real.
+La lista `agent_mix` contiene todas las estrategias del mix calculado. Las listas `bids` y `asks` contienen hasta diez niveles agregados por lado en la respuesta real, con `price`, `quantity` y `orders`.
 
 Errores:
 
@@ -275,6 +275,7 @@ Campos principales:
 - `tick`: tick actual.
 - `tick_interval_ms`: frecuencia objetivo del loop.
 - `order_book`: snapshot autoritativo resumido.
+- `order_book.bids` y `order_book.asks`: niveles agregados del libro con `price`, `quantity` y `orders`, pensados para visualizacion DEV y no para exponer cada orden individual.
 - `metrics`: metricas agregadas del mercado.
 - `recent_mid_prices`: traza compacta de mid-prices recientes para fallback visual.
 - `ohlcv_history`: barras autoritativas por tick con `tick`, `open`, `high`, `low`, `close`, `volume`, `trades` y metadato opcional de ballena.

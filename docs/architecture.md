@@ -91,6 +91,7 @@ Frontend React
   -> inicia o reinicia la sesion viva
   -> poll con una cadencia alineada al `tick_interval_ms` activo para reflejar los modos normal, rapido y muy rapido
   -> puede iniciar y cerrar un reto local `whale_challenge` sobre la misma sesion viva
+  -> puede mostrar en modo DEV el `order_book` agregado con niveles bid/ask, spread y profundidad
 Backend FastAPI
   -> mantiene una sesion en memoria
   -> selecciona un subconjunto activo por tick

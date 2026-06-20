@@ -207,6 +207,16 @@
   justify-content: flex-end;
 }
 
+.post-chart-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.post-chart-grid--dev {
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  align-items: start;
+}
+
 .challenge-card {
   display: grid;
   gap: 0.9rem;
@@ -341,6 +351,140 @@
   border-radius: 0.95rem;
   border: 1px solid rgba(233, 237, 243, 0.08);
   background: rgba(10, 17, 26, 0.18);
+}
+
+.order-book-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(140, 226, 212, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(15, 138, 117, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.order-book-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.order-book-card__eyebrow {
+  margin: 0;
+  color: rgba(140, 226, 212, 0.82);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.order-book-card__title {
+  margin: 0.2rem 0 0;
+  color: var(--surface-text-strong);
+  font-size: 1.05rem;
+}
+
+.order-book-card__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.order-book-card__stat {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(233, 237, 243, 0.08);
+  background: rgba(10, 17, 26, 0.22);
+}
+
+.order-book-card__stat span {
+  color: rgba(233, 237, 243, 0.62);
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.order-book-card__stat strong {
+  color: var(--surface-text-strong);
+  font-size: 1.05rem;
+}
+
+.order-book-table {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.order-book-table__side {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.order-book-table__heading {
+  color: rgba(233, 237, 243, 0.72);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.order-book-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(233, 237, 243, 0.08);
+  background: rgba(10, 17, 26, 0.18);
+}
+
+.order-book-row__bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  opacity: 0.22;
+}
+
+.order-book-row__bar--bid {
+  background: linear-gradient(90deg, rgba(69, 198, 170, 0.9), rgba(69, 198, 170, 0.12));
+}
+
+.order-book-row__bar--ask {
+  background: linear-gradient(90deg, rgba(244, 143, 100, 0.9), rgba(244, 143, 100, 0.12));
+}
+
+.order-book-row__content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.68rem 0.8rem;
+}
+
+.order-book-row__content strong,
+.order-book-row__content span,
+.order-book-row__content em {
+  font-size: 0.86rem;
+}
+
+.order-book-row__content strong {
+  color: var(--surface-text-strong);
+}
+
+.order-book-row__content span {
+  color: rgba(233, 237, 243, 0.78);
+}
+
+.order-book-row__content em {
+  color: rgba(233, 237, 243, 0.58);
+  font-style: normal;
+  text-align: right;
 }
 
 .position-strip {
@@ -913,7 +1057,13 @@
   .dashboard-control-grid,
   .hero-highlights,
   .challenge-card__stats,
+  .order-book-card__summary,
   .position-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .post-chart-grid--dev,
+  .order-book-table {
     grid-template-columns: 1fr;
   }
 

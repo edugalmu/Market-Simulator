@@ -75,6 +75,7 @@ function App() {
   const activeChartBars = chartBars.length > 0 ? chartBars : fallbackBars
   const whaleCashTotal = whaleBalance ? whaleBalance.cash_free + whaleBalance.cash_reserved : null
   const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
+  const liveOrderBook = liveSession?.order_book ?? null
   const initialPrice = liveSession?.config.initial_price ?? summary?.config.initial_price ?? 100
   const initialWhaleEquity = WHALE_INITIAL_CASH + WHALE_INITIAL_ASSET * initialPrice
   const estimatedPnl = whaleBalance
@@ -337,101 +338,172 @@ function App() {
             referenceTimeMs={referenceTimeMs}
           />
 
-          <section className="challenge-card" aria-label="Whale Challenge">
-            <div className="challenge-card__header">
-              <div className="challenge-card__copy">
-                <p className="challenge-card__eyebrow">Whale Challenge</p>
-                <h3 className="challenge-card__title">60 segundos</h3>
-                <p className="challenge-card__objective">
-                  Objetivo: mueve el mercado y maximiza el P&amp;L ejecutado sin quedarte sin liquidez.
-                </p>
+          <div className={`post-chart-grid${isDevMode ? ' post-chart-grid--dev' : ''}`}>
+            <section className="challenge-card" aria-label="Whale Challenge">
+              <div className="challenge-card__header">
+                <div className="challenge-card__copy">
+                  <p className="challenge-card__eyebrow">Whale Challenge</p>
+                  <h3 className="challenge-card__title">60 segundos</h3>
+                  <p className="challenge-card__objective">
+                    Objetivo: mueve el mercado y maximiza el P&amp;L ejecutado sin quedarte sin liquidez.
+                  </p>
+                </div>
+                <span className={`challenge-status challenge-status--${game?.status ?? 'idle'}`}>
+                  {challengeStatusLabel}
+                </span>
               </div>
-              <span className={`challenge-status challenge-status--${game?.status ?? 'idle'}`}>
-                {challengeStatusLabel}
-              </span>
-            </div>
 
-            <div className="challenge-card__stats">
-              <div className="challenge-stat">
-                <span>Tiempo</span>
-                <strong>{game ? `${game.remaining_ticks}s` : '60s'}</strong>
+              <div className="challenge-card__stats">
+                <div className="challenge-stat">
+                  <span>Tiempo</span>
+                  <strong>{game ? `${game.remaining_ticks}s` : '60s'}</strong>
+                </div>
+                <div className="challenge-stat">
+                  <span>Score</span>
+                  <strong>{formatGameScore(game?.score ?? 0)}</strong>
+                </div>
+                <div className="challenge-stat">
+                  <span>Estado</span>
+                  <strong>{challengeStatusLabel}</strong>
+                </div>
               </div>
-              <div className="challenge-stat">
-                <span>Score</span>
-                <strong>{formatGameScore(game?.score ?? 0)}</strong>
-              </div>
-              <div className="challenge-stat">
-                <span>Estado</span>
-                <strong>{challengeStatusLabel}</strong>
-              </div>
-            </div>
 
-            <div className="challenge-breakdown">
-              <span>P&amp;L score {formatGameScore(game?.score_breakdown.pnl_score ?? 0)}</span>
-              <span>Impacto {formatGameScore(game?.score_breakdown.impact_score ?? 0)}</span>
-              <span>Volumen {formatGameScore(game?.score_breakdown.volume_score ?? 0)}</span>
-            </div>
+              <div className="challenge-breakdown">
+                <span>P&amp;L score {formatGameScore(game?.score_breakdown.pnl_score ?? 0)}</span>
+                <span>Impacto {formatGameScore(game?.score_breakdown.impact_score ?? 0)}</span>
+                <span>Volumen {formatGameScore(game?.score_breakdown.volume_score ?? 0)}</span>
+              </div>
 
-            <div className="challenge-card__actions">
-              {game?.status === 'running' ? (
+              <div className="challenge-card__actions">
+                {game?.status === 'running' ? (
+                  <button
+                    className="control-button control-button--secondary"
+                    onClick={() => void endLiveGame()}
+                    disabled={actionLoading || !liveSession}
+                    type="button"
+                  >
+                    Terminar reto
+                  </button>
+                ) : (
+                  <button
+                    className="control-button"
+                    onClick={handleStartChallenge}
+                    disabled={actionLoading || !liveSession}
+                    type="button"
+                  >
+                    {game?.status === 'ended' ? 'Reintentar reto' : 'Iniciar reto 60s'}
+                  </button>
+                )}
+
                 <button
                   className="control-button control-button--secondary"
-                  onClick={() => void endLiveGame()}
-                  disabled={actionLoading || !liveSession}
+                  onClick={() => void resetLiveGame()}
+                  disabled={actionLoading || !liveSession || game?.status === 'idle'}
                   type="button"
                 >
-                  Terminar reto
+                  Reiniciar reto
                 </button>
-              ) : (
-                <button
-                  className="control-button"
-                  onClick={handleStartChallenge}
-                  disabled={actionLoading || !liveSession}
-                  type="button"
-                >
-                  {game?.status === 'ended' ? 'Reintentar reto' : 'Iniciar reto 60s'}
-                </button>
-              )}
-
-              <button
-                className="control-button control-button--secondary"
-                onClick={() => void resetLiveGame()}
-                disabled={actionLoading || !liveSession || game?.status === 'idle'}
-                type="button"
-              >
-                Reiniciar reto
-              </button>
-            </div>
-
-            {finalGameResult ? (
-              <div className="challenge-result">
-                <div className="challenge-result__item">
-                  <span>Resultado final</span>
-                  <strong>{formatGameScore(finalGameResult.score)}</strong>
-                </div>
-                <div className="challenge-result__item">
-                  <span>P&amp;L ejecutado</span>
-                  <strong>{formatSignedCurrency(finalGameResult.pnl_executed)}</strong>
-                </div>
-                <div className="challenge-result__item">
-                  <span>Maximo impacto</span>
-                  <strong>{finalGameResult.max_impact_bps.toFixed(2)} bps</strong>
-                </div>
-                <div className="challenge-result__item">
-                  <span>Volumen ballena</span>
-                  <strong>{formatGameScore(finalGameResult.total_volume)}</strong>
-                </div>
-                <div className="challenge-result__item">
-                  <span>Ordenes ejecutadas</span>
-                  <strong>{finalGameResult.whale_orders}</strong>
-                </div>
-                <div className="challenge-result__item">
-                  <span>Precio final</span>
-                  <strong>${finalGameResult.ending_price.toFixed(2)}</strong>
-                </div>
               </div>
+
+              {finalGameResult ? (
+                <div className="challenge-result">
+                  <div className="challenge-result__item">
+                    <span>Resultado final</span>
+                    <strong>{formatGameScore(finalGameResult.score)}</strong>
+                  </div>
+                  <div className="challenge-result__item">
+                    <span>P&amp;L ejecutado</span>
+                    <strong>{formatSignedCurrency(finalGameResult.pnl_executed)}</strong>
+                  </div>
+                  <div className="challenge-result__item">
+                    <span>Maximo impacto</span>
+                    <strong>{finalGameResult.max_impact_bps.toFixed(2)} bps</strong>
+                  </div>
+                  <div className="challenge-result__item">
+                    <span>Volumen ballena</span>
+                    <strong>{formatGameScore(finalGameResult.total_volume)}</strong>
+                  </div>
+                  <div className="challenge-result__item">
+                    <span>Ordenes ejecutadas</span>
+                    <strong>{finalGameResult.whale_orders}</strong>
+                  </div>
+                  <div className="challenge-result__item">
+                    <span>Precio final</span>
+                    <strong>${finalGameResult.ending_price.toFixed(2)}</strong>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+
+            {isDevMode ? (
+              <section className="order-book-card" aria-label="Order Book">
+                <div className="order-book-card__header">
+                  <div>
+                    <p className="order-book-card__eyebrow">Order Book</p>
+                    <h3 className="order-book-card__title">Liquidez visible</h3>
+                  </div>
+                  <span className="micro-tag">
+                    Spread {liveOrderBook ? `${liveOrderBook.spread_bps.toFixed(2)} bps` : '--'}
+                  </span>
+                </div>
+
+                <div className="order-book-card__summary">
+                  <div className="order-book-card__stat">
+                    <span>Best bid</span>
+                    <strong>{liveOrderBook ? `$${liveOrderBook.best_bid.toFixed(2)}` : '--'}</strong>
+                  </div>
+                  <div className="order-book-card__stat">
+                    <span>Best ask</span>
+                    <strong>{liveOrderBook ? `$${liveOrderBook.best_ask.toFixed(2)}` : '--'}</strong>
+                  </div>
+                  <div className="order-book-card__stat">
+                    <span>Bid depth</span>
+                    <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.bid_depth) : '--'}</strong>
+                  </div>
+                  <div className="order-book-card__stat">
+                    <span>Ask depth</span>
+                    <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.ask_depth) : '--'}</strong>
+                  </div>
+                </div>
+
+                <div className="order-book-table">
+                  <div className="order-book-table__side">
+                    <div className="order-book-table__heading">Bids</div>
+                    {(liveOrderBook?.bids ?? []).map((level) => (
+                      <div className="order-book-row order-book-row--bid" key={`bid-${level.price}`}>
+                        <div
+                          className="order-book-row__bar order-book-row__bar--bid"
+                          style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
+                        />
+                        <div className="order-book-row__content">
+                          <strong>{level.price.toFixed(2)}</strong>
+                          <span>{formatBookNumber(level.quantity)}</span>
+                          <em>{level.orders} ord</em>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="order-book-table__side">
+                    <div className="order-book-table__heading">Asks</div>
+                    {(liveOrderBook?.asks ?? []).map((level) => (
+                      <div className="order-book-row order-book-row--ask" key={`ask-${level.price}`}>
+                        <div
+                          className="order-book-row__bar order-book-row__bar--ask"
+                          style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
+                        />
+                        <div className="order-book-row__content">
+                          <strong>{level.price.toFixed(2)}</strong>
+                          <span>{formatBookNumber(level.quantity)}</span>
+                          <em>{level.orders} ord</em>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
             ) : null}
-          </section>
+          </div>
         </div>
       </section>
 
@@ -865,6 +937,22 @@ function formatGameScore(value: number) {
     minimumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2,
     maximumFractionDigits: 2,
   })
+}
+
+function formatBookNumber(value: number) {
+  return value.toLocaleString('es-ES', {
+    minimumFractionDigits: value >= 100 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })
+}
+
+function getOrderBookBarWidth(quantity: number, bids: Array<{ quantity: number }>, asks: Array<{ quantity: number }>) {
+  const maxQuantity = Math.max(...bids.map((level) => level.quantity), ...asks.map((level) => level.quantity), 0)
+  if (maxQuantity <= 0) {
+    return 0
+  }
+
+  return Math.max((quantity / maxQuantity) * 100, 6)
 }
 
 function formatQuantity(value: number | null, digits: number) {

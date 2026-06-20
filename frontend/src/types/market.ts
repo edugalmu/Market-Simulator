@@ -27,6 +27,7 @@ export type AgentMixEntry = {
 export type OrderBookLevel = {
   price: number
   quantity: number
+  orders: number
 }
 
 export type OrderBookSnapshot = {

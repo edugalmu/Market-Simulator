@@ -222,7 +222,7 @@ class SimulationEngine:
             mid_price=mid_price,
         )
 
-        bids, asks = order_book.snapshot(depth=5)
+        bids, asks = order_book.snapshot(depth=10)
 
         return OrderBookSnapshot(
             best_bid=best_bid,
@@ -231,8 +231,8 @@ class SimulationEngine:
             spread_bps=spread_bps,
             bid_depth=order_book.bid_depth,
             ask_depth=order_book.ask_depth,
-            bids=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in bids],
-            asks=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in asks],
+            bids=[OrderBookLevel(price=level.price, quantity=level.quantity, orders=level.orders) for level in bids],
+            asks=[OrderBookLevel(price=level.price, quantity=level.quantity, orders=level.orders) for level in asks],
         )
 
     def _build_metrics(

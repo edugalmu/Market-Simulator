@@ -136,4 +136,5 @@ def _apply_level_fill(
         levels.pop(0)
         return
 
-    levels[0] = BookLevel(price=level.price, quantity=remaining_level_quantity)
+    remaining_orders = max(level.orders - 1, 1)
+    levels[0] = BookLevel(price=level.price, quantity=remaining_level_quantity, orders=remaining_orders)

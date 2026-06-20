@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class BookLevel:
     price: float
     quantity: float
+    orders: int
 
 
 class OrderBook:
@@ -35,8 +36,9 @@ class OrderBook:
         for index in range(levels):
             offset = reference_price * ((index + 1) * spacing_bps / 10_000)
             quantity = round(base_quantity * (1 + index * 0.2), 4)
-            self.bids.append(BookLevel(price=round(reference_price - offset, 2), quantity=quantity))
-            self.asks.append(BookLevel(price=round(reference_price + offset, 2), quantity=quantity))
+            orders = max(1, 5 + index * 2)
+            self.bids.append(BookLevel(price=round(reference_price - offset, 2), quantity=quantity, orders=orders))
+            self.asks.append(BookLevel(price=round(reference_price + offset, 2), quantity=quantity, orders=orders))
 
         self.bids.sort(key=lambda level: level.price, reverse=True)
         self.asks.sort(key=lambda level: level.price)
@@ -52,18 +54,21 @@ class OrderBook:
         for index in range(levels):
             offset = reference_price * ((index + 1) * spacing_bps / 10_000)
             quantity = round(base_quantity * (1 + index * 0.18), 4)
+            orders = max(1, 4 + index * 2)
             bid_price = round(reference_price - offset, 2)
             ask_price = round(reference_price + offset, 2)
             self._ensure_level(
                 self.bids,
                 price=bid_price,
                 target_quantity=quantity,
+                target_orders=orders,
                 reverse=True,
             )
             self._ensure_level(
                 self.asks,
                 price=ask_price,
                 target_quantity=quantity,
+                target_orders=orders,
                 reverse=False,
             )
 
@@ -98,16 +103,21 @@ class OrderBook:
         *,
         price: float,
         target_quantity: float,
+        target_orders: int,
         reverse: bool,
     ) -> None:
         for index, level in enumerate(levels):
             if level.price != price:
                 continue
 
-            if level.quantity < target_quantity:
-                levels[index] = BookLevel(price=price, quantity=target_quantity)
+            if level.quantity < target_quantity or level.orders < target_orders:
+                levels[index] = BookLevel(
+                    price=price,
+                    quantity=max(level.quantity, target_quantity),
+                    orders=max(level.orders, target_orders),
+                )
             break
         else:
-            levels.append(BookLevel(price=price, quantity=target_quantity))
+            levels.append(BookLevel(price=price, quantity=target_quantity, orders=target_orders))
 
         levels.sort(key=lambda level: level.price, reverse=reverse)

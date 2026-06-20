@@ -71,6 +71,7 @@ Avance parcial ya implementado:
 - la UI ya muestra una grafica principal de OHLCV real por tick desde backend para seguir el precio vivo y destacar el ultimo impacto de ballena.
 - la UI ya puede reagrupar esas barras OHLCV en 1s, 5s, 10s, 30s y 1 min desde frontend sin cambiar el motor ni el contrato API.
 - existe un primer loop jugable `Whale Challenge - 60 segundos` con score, contador y resumen final sobre la sesion viva actual.
+- el modo DEV ya muestra un `Order Book` agregado con hasta 10 niveles por lado, spread y profundidad desde el snapshot vivo.
 - `recent_mid_prices` se mantiene como fallback visual si todavia no hay suficientes barras para dibujar velas.
 
 ## Fase 3. Persistencia y replay

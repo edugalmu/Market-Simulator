@@ -22,6 +22,7 @@ class AgentMixEntry(BaseModel):
 class OrderBookLevel(BaseModel):
     price: float
     quantity: float
+    orders: int
 
 
 class OrderBookSnapshot(BaseModel):
