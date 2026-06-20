@@ -25,6 +25,11 @@ class BookOrder:
     quantity: float
     created_tick: int
     ttl_ticks: int
+    is_iceberg: bool = False
+    display_quantity: float | None = None
+    hidden_quantity: float = 0.0
+    replenish_quantity: float = 0.0
+    initial_hidden_quantity: float = 0.0
 
 
 class OrderBook:
@@ -179,6 +184,45 @@ class OrderBook:
         self._sort_orders(side)
         return order.order_id
 
+    def add_iceberg_order(
+        self,
+        *,
+        side: OrderSide,
+        price: float,
+        display_quantity: float,
+        hidden_quantity: float,
+        replenish_quantity: float,
+        agent_id: int,
+        strategy_type: str,
+        created_tick: int,
+        ttl_ticks: int,
+    ) -> int | None:
+        visible_quantity = round(display_quantity, 6)
+        hidden_quantity = round(hidden_quantity, 6)
+        replenish_quantity = round(replenish_quantity, 6)
+        if visible_quantity <= 1e-9:
+            return None
+
+        order = BookOrder(
+            order_id=self._next_order_id,
+            agent_id=agent_id,
+            strategy_type=strategy_type,
+            side=side,
+            price=round(price, 2),
+            quantity=visible_quantity,
+            created_tick=created_tick,
+            ttl_ticks=max(ttl_ticks, 1),
+            is_iceberg=True,
+            display_quantity=visible_quantity,
+            hidden_quantity=max(hidden_quantity, 0.0),
+            replenish_quantity=max(replenish_quantity, visible_quantity),
+            initial_hidden_quantity=max(hidden_quantity, 0.0),
+        )
+        self._next_order_id += 1
+        self._orders_for(side).append(order)
+        self._sort_orders(side)
+        return order.order_id
+
     def expire_orders(self) -> int:
         removed = 0
         for orders in (self.bid_orders, self.ask_orders):
@@ -263,6 +307,13 @@ class OrderBook:
 
             order.quantity = round(order.quantity - fill_quantity, 6)
             if order.quantity <= 1e-9:
+                if order.is_iceberg and order.hidden_quantity > 1e-9:
+                    replenished_quantity = min(order.replenish_quantity, order.hidden_quantity)
+                    order.hidden_quantity = round(order.hidden_quantity - replenished_quantity, 6)
+                    order.quantity = round(replenished_quantity, 6)
+                    order.display_quantity = round(replenished_quantity, 6)
+                    return
+
                 orders.pop(index)
             return
 

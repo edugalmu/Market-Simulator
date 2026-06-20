@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.events import OrderSide
-from app.core.order_book import BookOrder, OrderBook
+from app.core.order_book import OrderBook
 
 
 @dataclass(slots=True, frozen=True)

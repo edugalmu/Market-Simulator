@@ -1,4 +1,6 @@
 from app.core.events import OrderSide
+from app.core.matching import execute_market_order
+from app.core.order_book import OrderBook
 from app.simulation.engine import SimulationEngine
 from app.simulation.live import LiveSimulationService, REGIME_PARAMS
 from app.simulation.models import SessionConfig
@@ -357,6 +359,141 @@ def test_live_session_preload_ticks_do_not_change_with_speed() -> None:
     assert slow_snapshot.tick == 600
     assert fast_snapshot.simulated_tick_interval_ms == 1000
     assert slow_snapshot.simulated_tick_interval_ms == 1000
+
+
+def test_add_iceberg_order_creates_visible_and_hidden_parts() -> None:
+    order_book = OrderBook()
+    order_id = order_book.add_iceberg_order(
+        side=OrderSide.BUY,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=90.0,
+        replenish_quantity=10.0,
+        agent_id=101,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    assert order_id is not None
+    assert order_book.bid_orders[0].is_iceberg is True
+    assert order_book.bid_orders[0].quantity == 10.0
+    assert order_book.bid_orders[0].hidden_quantity == 90.0
+
+
+def test_iceberg_snapshot_shows_only_visible_quantity() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.BUY,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=90.0,
+        replenish_quantity=10.0,
+        agent_id=101,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    bids, _ = order_book.snapshot(depth=5)
+
+    assert bids[0].quantity == 10.0
+    assert bids[0].orders == 1
+
+
+def test_iceberg_partial_fill_without_replenishment_touching_hidden() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.SELL,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=90.0,
+        replenish_quantity=10.0,
+        agent_id=202,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    result = execute_market_order(order_book, side=OrderSide.BUY, quantity=5.0)
+
+    assert result.quantity_matched == 5.0
+    assert result.trades_executed == 1
+    assert order_book.ask_orders[0].quantity == 5.0
+    assert order_book.ask_orders[0].hidden_quantity == 90.0
+
+
+def test_iceberg_replenishes_from_hidden_quantity() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.SELL,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=90.0,
+        replenish_quantity=10.0,
+        agent_id=202,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    result = execute_market_order(order_book, side=OrderSide.BUY, quantity=15.0)
+
+    assert result.quantity_matched == 15.0
+    assert result.trades_executed == 2
+    assert order_book.ask_orders[0].quantity == 5.0
+    assert order_book.ask_orders[0].hidden_quantity == 80.0
+
+
+def test_iceberg_prevents_price_traversal_until_hidden_is_exhausted() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.SELL,
+        price=100.0,
+        display_quantity=10.0,
+        hidden_quantity=20.0,
+        replenish_quantity=10.0,
+        agent_id=202,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+    order_book.add_limit_order(
+        side=OrderSide.SELL,
+        price=101.0,
+        quantity=12.0,
+        agent_id=203,
+        strategy_type="normal",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    first = execute_market_order(order_book, side=OrderSide.BUY, quantity=25.0)
+    assert first.quantity_matched == 25.0
+    assert order_book.best_ask == 100.0
+
+    second = execute_market_order(order_book, side=OrderSide.BUY, quantity=10.0)
+    assert second.quantity_matched == 10.0
+    assert order_book.best_ask == 101.0
+
+
+def test_iceberg_does_not_leave_negative_quantities() -> None:
+    order_book = OrderBook()
+    order_book.add_iceberg_order(
+        side=OrderSide.SELL,
+        price=100.0,
+        display_quantity=5.0,
+        hidden_quantity=5.0,
+        replenish_quantity=5.0,
+        agent_id=202,
+        strategy_type="iceberg",
+        created_tick=1,
+        ttl_ticks=20,
+    )
+
+    execute_market_order(order_book, side=OrderSide.BUY, quantity=10.0)
+
+    assert not order_book.ask_orders
 
 
 def test_live_session_whale_starts_with_one_fifth_of_total_capital() -> None:
