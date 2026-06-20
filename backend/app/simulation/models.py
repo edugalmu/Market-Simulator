@@ -73,6 +73,22 @@ class TickReport(BaseModel):
     mid_price: float
 
 
+class MarketRegimeState(BaseModel):
+    name: str
+    ticks_remaining: int
+    buy_bias: float
+    sell_bias: float
+    volatility_multiplier: float
+    liquidity_multiplier: float
+    spread_multiplier: float
+    whale_activity_multiplier: float
+    momentum_multiplier: float
+    mean_reversion_multiplier: float
+    maker_cancel_multiplier: float
+    gap_probability: float
+    reason: str | None = None
+
+
 class OhlcvBar(BaseModel):
     tick: int
     open: float
@@ -165,6 +181,7 @@ class LiveSimulationSnapshot(BaseModel):
     recent_mid_prices: list[float] = Field(default_factory=list)
     ohlcv_history: list[OhlcvBar] = Field(default_factory=list)
     last_tick: TickReport | None = None
+    market_regime: MarketRegimeState
     whale_balance: WhaleBalanceSnapshot
     last_whale_order: LiveWhaleOrderOutcome | None = None
     top_agents: list[TopAgentEntry] = Field(default_factory=list)

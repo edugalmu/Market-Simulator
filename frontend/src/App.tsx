@@ -73,6 +73,7 @@ function App() {
   const whaleCashTotal = whaleBalance ? whaleBalance.cash_free + whaleBalance.cash_reserved : null
   const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
   const liveOrderBook = liveSession?.order_book ?? null
+  const marketRegime = liveSession?.market_regime ?? null
   const topAgents = liveSession?.top_agents ?? []
   const totalAgentEquity = liveSession?.metrics.total_agent_equity ?? null
   const initialWhaleEquity = whaleBalance?.initial_total_equity ?? null
@@ -459,72 +460,117 @@ function App() {
             </section>
 
             {isDevMode ? (
-              <section className="order-book-card" aria-label="Order Book">
-                <div className="order-book-card__header">
-                  <div>
-                    <p className="order-book-card__eyebrow">Order Book</p>
-                    <h3 className="order-book-card__title">Liquidez visible</h3>
+              <div className="dev-side-stack">
+                <section className="regime-card" aria-label="Market Regime">
+                  <div className="regime-card__header">
+                    <div>
+                      <p className="order-book-card__eyebrow">Market Regime</p>
+                      <h3 className="order-book-card__title">{marketRegime?.name ?? '--'}</h3>
+                    </div>
+                    <span className="micro-tag">
+                      {marketRegime ? `${marketRegime.ticks_remaining} ticks` : '--'}
+                    </span>
                   </div>
-                  <span className="micro-tag">
-                    Spread {liveOrderBook ? `${liveOrderBook.spread_bps.toFixed(2)} bps` : '--'}
-                  </span>
-                </div>
 
-                <div className="order-book-card__summary">
-                  <div className="order-book-card__stat">
-                    <span>Best bid</span>
-                    <strong>{liveOrderBook ? `$${liveOrderBook.best_bid.toFixed(2)}` : '--'}</strong>
+                  <div className="regime-card__grid">
+                    <div className="regime-card__item">
+                      <span>Buy / Sell</span>
+                      <strong>
+                        {marketRegime
+                          ? `${formatPercent(marketRegime.buy_bias * 100)} / ${formatPercent(marketRegime.sell_bias * 100)}`
+                          : '--'}
+                      </strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Volatilidad</span>
+                      <strong>{marketRegime ? `${marketRegime.volatility_multiplier.toFixed(2)}x` : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Liquidez</span>
+                      <strong>{marketRegime ? `${marketRegime.liquidity_multiplier.toFixed(2)}x` : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Spread</span>
+                      <strong>{marketRegime ? `${marketRegime.spread_multiplier.toFixed(2)}x` : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Gaps</span>
+                      <strong>{marketRegime ? formatPercent(marketRegime.gap_probability * 100) : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Motivo</span>
+                      <strong>{marketRegime?.reason ?? '--'}</strong>
+                    </div>
                   </div>
-                  <div className="order-book-card__stat">
-                    <span>Best ask</span>
-                    <strong>{liveOrderBook ? `$${liveOrderBook.best_ask.toFixed(2)}` : '--'}</strong>
-                  </div>
-                  <div className="order-book-card__stat">
-                    <span>Bid depth</span>
-                    <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.bid_depth) : '--'}</strong>
-                  </div>
-                  <div className="order-book-card__stat">
-                    <span>Ask depth</span>
-                    <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.ask_depth) : '--'}</strong>
-                  </div>
-                </div>
+                </section>
 
-                <div className="order-book-table">
-                  <div className="order-book-table__side">
-                    <div className="order-book-table__heading">Bids</div>
-                    {(liveOrderBook?.bids ?? []).map((level) => (
-                      <div className="order-book-row order-book-row--bid" key={`bid-${level.price}`}>
-                        <div
-                          className="order-book-row__bar order-book-row__bar--bid"
-                          style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
-                        />
-                        <div className="order-book-row__content">
-                          <strong>{level.price.toFixed(2)}</strong>
-                          <span>{formatBookNumber(level.quantity)}</span>
-                          <em>{level.orders} ord</em>
+                <section className="order-book-card" aria-label="Order Book">
+                  <div className="order-book-card__header">
+                    <div>
+                      <p className="order-book-card__eyebrow">Order Book</p>
+                      <h3 className="order-book-card__title">Liquidez visible</h3>
+                    </div>
+                    <span className="micro-tag">
+                      Spread {liveOrderBook ? `${liveOrderBook.spread_bps.toFixed(2)} bps` : '--'}
+                    </span>
+                  </div>
+
+                  <div className="order-book-card__summary">
+                    <div className="order-book-card__stat">
+                      <span>Best bid</span>
+                      <strong>{liveOrderBook ? `$${liveOrderBook.best_bid.toFixed(2)}` : '--'}</strong>
+                    </div>
+                    <div className="order-book-card__stat">
+                      <span>Best ask</span>
+                      <strong>{liveOrderBook ? `$${liveOrderBook.best_ask.toFixed(2)}` : '--'}</strong>
+                    </div>
+                    <div className="order-book-card__stat">
+                      <span>Bid depth</span>
+                      <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.bid_depth) : '--'}</strong>
+                    </div>
+                    <div className="order-book-card__stat">
+                      <span>Ask depth</span>
+                      <strong>{liveOrderBook ? formatBookNumber(liveOrderBook.ask_depth) : '--'}</strong>
+                    </div>
+                  </div>
+
+                  <div className="order-book-table">
+                    <div className="order-book-table__side">
+                      <div className="order-book-table__heading">Bids</div>
+                      {(liveOrderBook?.bids ?? []).map((level) => (
+                        <div className="order-book-row order-book-row--bid" key={`bid-${level.price}`}>
+                          <div
+                            className="order-book-row__bar order-book-row__bar--bid"
+                            style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
+                          />
+                          <div className="order-book-row__content">
+                            <strong>{level.price.toFixed(2)}</strong>
+                            <span>{formatBookNumber(level.quantity)}</span>
+                            <em>{level.orders} ord</em>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
 
-                  <div className="order-book-table__side">
-                    <div className="order-book-table__heading">Asks</div>
-                    {(liveOrderBook?.asks ?? []).map((level) => (
-                      <div className="order-book-row order-book-row--ask" key={`ask-${level.price}`}>
-                        <div
-                          className="order-book-row__bar order-book-row__bar--ask"
-                          style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
-                        />
-                        <div className="order-book-row__content">
-                          <strong>{level.price.toFixed(2)}</strong>
-                          <span>{formatBookNumber(level.quantity)}</span>
-                          <em>{level.orders} ord</em>
+                    <div className="order-book-table__side">
+                      <div className="order-book-table__heading">Asks</div>
+                      {(liveOrderBook?.asks ?? []).map((level) => (
+                        <div className="order-book-row order-book-row--ask" key={`ask-${level.price}`}>
+                          <div
+                            className="order-book-row__bar order-book-row__bar--ask"
+                            style={{ width: `${getOrderBookBarWidth(level.quantity, liveOrderBook?.bids ?? [], liveOrderBook?.asks ?? [])}%` }}
+                          />
+                          <div className="order-book-row__content">
+                            <strong>{level.price.toFixed(2)}</strong>
+                            <span>{formatBookNumber(level.quantity)}</span>
+                            <em>{level.orders} ord</em>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
+              </div>
             ) : null}
           </div>
         </div>

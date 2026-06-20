@@ -17,6 +17,7 @@ Implementado y verificable en el repositorio:
 - Primer minijuego local `Whale Challenge - 60 segundos` con score, contador, resumen final y reinicio sobre la misma sesion viva.
 - Panel DEV de `Order Book` con bids/asks agregados, spread y profundidad visible desde el snapshot vivo.
 - El `Order Book` de la sesion viva ahora persiste entre ticks: envejece, expira por TTL, se consume con market orders y se refresca de forma parcial.
+- Supervisor de régimen de mercado con fases como `neutral`, `uptrend`, `downtrend`, `panic`, `short_squeeze` y `post_whale_consolidation`, visible en modo DEV.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.

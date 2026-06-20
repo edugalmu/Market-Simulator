@@ -73,6 +73,7 @@ Avance parcial ya implementado:
 - existe un primer loop jugable `Whale Challenge - 60 segundos` con score, contador y resumen final sobre la sesion viva actual.
 - el modo DEV ya muestra un `Order Book` agregado con hasta 10 niveles por lado, spread y profundidad desde el snapshot vivo.
 - el libro ya no se resembra completo por tick: ahora conserva ordenes limit en memoria, aplica expiracion TTL, cancelaciones parciales y refresco gradual de liquidez.
+- la sesion viva ya expone y usa un `market_regime` real que modifica gaps, sesgos, volatilidad, liquidez y reacciones post-ballena.
 - `recent_mid_prices` se mantiene como fallback visual si todavia no hay suficientes barras para dibujar velas.
 
 ## Fase 3. Persistencia y replay

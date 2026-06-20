@@ -1,6 +1,6 @@
 from app.core.events import OrderSide
 from app.simulation.engine import SimulationEngine
-from app.simulation.live import LiveSimulationService
+from app.simulation.live import LiveSimulationService, REGIME_PARAMS
 from app.simulation.models import SessionConfig
 
 
@@ -203,6 +203,72 @@ def test_live_snapshot_exposes_aggregated_order_book_levels() -> None:
     assert snapshot.order_book.asks[0].price >= snapshot.order_book.best_ask
     assert all(level.orders >= 1 for level in snapshot.order_book.bids)
     assert all(level.orders >= 1 for level in snapshot.order_book.asks)
+
+
+def test_live_snapshot_includes_market_regime() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=47), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    valid_regimes = {
+        "neutral",
+        "accumulation",
+        "uptrend",
+        "distribution",
+        "downtrend",
+        "panic",
+        "short_squeeze",
+        "post_whale_consolidation",
+    }
+
+    assert snapshot.market_regime.name in valid_regimes
+    assert round(snapshot.market_regime.buy_bias + snapshot.market_regime.sell_bias, 6) == 1.0
+
+
+def test_market_regime_ticks_remaining_decrease_and_can_transition() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=48), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    before_ticks = snapshot.market_regime.ticks_remaining
+    next_snapshot = service.step(ticks=1)
+    assert next_snapshot.market_regime.ticks_remaining <= before_ticks
+
+    session.market_regime.ticks_remaining = 1
+    previous_name = session.market_regime.name
+    transitioned = service.step(ticks=1)
+    service.reset()
+
+    assert transitioned.market_regime.ticks_remaining > 0
+    assert transitioned.market_regime.reason in {"timer_transition", "breakout_volume", "support_break_panic", "resistance_break_squeeze"}
+    assert transitioned.market_regime.name != ""
+    assert transitioned.market_regime.name != previous_name or transitioned.market_regime.reason == "timer_transition"
+
+
+def test_large_whale_buy_can_trigger_post_whale_consolidation() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=49), gpu_enabled=False, auto_run=False)
+    response = service.execute_whale_order(side="buy", notional=75_000.0)
+    service.reset()
+
+    assert response.snapshot.market_regime.name == "post_whale_consolidation"
+    assert response.snapshot.market_regime.reason == "whale_buy_shock"
+
+
+def test_large_whale_sell_can_trigger_post_whale_consolidation() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=50), gpu_enabled=False, auto_run=False)
+    response = service.execute_whale_order(side="sell", notional=75_000.0)
+    service.reset()
+
+    assert response.snapshot.market_regime.name == "post_whale_consolidation"
+    assert response.snapshot.market_regime.reason == "whale_sell_shock"
+
+
+def test_panic_and_short_squeeze_have_more_gap_probability_than_neutral() -> None:
+    assert REGIME_PARAMS["panic"]["gap_probability"] > REGIME_PARAMS["neutral"]["gap_probability"]
+    assert REGIME_PARAMS["short_squeeze"]["gap_probability"] > REGIME_PARAMS["neutral"]["gap_probability"]
 
 
 def test_order_book_preserves_some_orders_between_ticks() -> None:

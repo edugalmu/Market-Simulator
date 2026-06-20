@@ -118,8 +118,15 @@ class OrderBook:
         created_tick: int = 0,
         ttl_ticks: int = 12,
         strategy_type: str = "market_maker",
+        rng: Random | None = None,
+        gap_probability: float = 0.0,
     ) -> None:
         for index in range(levels):
+            if rng is not None and gap_probability > 0:
+                distance_multiplier = 0.55 + (index / max(levels - 1, 1)) * 0.9
+                if rng.random() < min(gap_probability * distance_multiplier, 0.9):
+                    continue
+
             offset = reference_price * ((index + 1) * spacing_bps / 10_000)
             quantity = round(base_quantity * (1 + index * 0.18), 4)
             target_orders = max(1, 4 + index * 2)

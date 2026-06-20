@@ -23,6 +23,7 @@ from app.simulation.models import (
     LiveSimulationSnapshot,
     LiveWhaleOrderOutcome,
     LiveWhaleOrderResponse,
+    MarketRegimeState,
     OhlcvBar,
     SessionConfig,
     TickReport,
@@ -54,6 +55,116 @@ SHOCK_BIAS_DECAY = 0.72
 MAX_SHOCK_BIAS_BPS = 85.0
 WHALE_CHALLENGE_MODE = "whale_challenge"
 WHALE_CHALLENGE_DURATION_TICKS = 60
+WHALE_SHOCK_THRESHOLD_USD = 50_000
+PANIC_PRICE_CHANGE_BPS = -120.0
+SHORT_SQUEEZE_PRICE_CHANGE_BPS = 120.0
+
+REGIME_PARAMS: dict[str, dict[str, float | tuple[int, int]]] = {
+    "neutral": {
+        "duration": (100, 500),
+        "buy_bias": 0.50,
+        "sell_bias": 0.50,
+        "volatility_multiplier": 0.5,
+        "liquidity_multiplier": 1.5,
+        "spread_multiplier": 1.0,
+        "whale_activity_multiplier": 0.7,
+        "momentum_multiplier": 0.8,
+        "mean_reversion_multiplier": 1.2,
+        "maker_cancel_multiplier": 0.8,
+        "gap_probability": 0.08,
+    },
+    "accumulation": {
+        "duration": (80, 300),
+        "buy_bias": 0.58,
+        "sell_bias": 0.42,
+        "volatility_multiplier": 0.7,
+        "liquidity_multiplier": 1.2,
+        "spread_multiplier": 1.1,
+        "whale_activity_multiplier": 0.8,
+        "momentum_multiplier": 0.9,
+        "mean_reversion_multiplier": 1.3,
+        "maker_cancel_multiplier": 0.9,
+        "gap_probability": 0.10,
+    },
+    "uptrend": {
+        "duration": (50, 200),
+        "buy_bias": 0.70,
+        "sell_bias": 0.30,
+        "volatility_multiplier": 1.2,
+        "liquidity_multiplier": 1.0,
+        "spread_multiplier": 1.2,
+        "whale_activity_multiplier": 1.0,
+        "momentum_multiplier": 1.5,
+        "mean_reversion_multiplier": 0.7,
+        "maker_cancel_multiplier": 1.0,
+        "gap_probability": 0.15,
+    },
+    "distribution": {
+        "duration": (80, 300),
+        "buy_bias": 0.42,
+        "sell_bias": 0.58,
+        "volatility_multiplier": 0.8,
+        "liquidity_multiplier": 1.2,
+        "spread_multiplier": 1.1,
+        "whale_activity_multiplier": 0.8,
+        "momentum_multiplier": 0.9,
+        "mean_reversion_multiplier": 1.3,
+        "maker_cancel_multiplier": 0.9,
+        "gap_probability": 0.12,
+    },
+    "downtrend": {
+        "duration": (50, 200),
+        "buy_bias": 0.30,
+        "sell_bias": 0.70,
+        "volatility_multiplier": 1.3,
+        "liquidity_multiplier": 0.9,
+        "spread_multiplier": 1.3,
+        "whale_activity_multiplier": 1.0,
+        "momentum_multiplier": 1.5,
+        "mean_reversion_multiplier": 0.7,
+        "maker_cancel_multiplier": 1.1,
+        "gap_probability": 0.18,
+    },
+    "panic": {
+        "duration": (10, 30),
+        "buy_bias": 0.10,
+        "sell_bias": 0.90,
+        "volatility_multiplier": 3.0,
+        "liquidity_multiplier": 0.3,
+        "spread_multiplier": 4.0,
+        "whale_activity_multiplier": 1.8,
+        "momentum_multiplier": 2.0,
+        "mean_reversion_multiplier": 0.3,
+        "maker_cancel_multiplier": 3.0,
+        "gap_probability": 0.50,
+    },
+    "short_squeeze": {
+        "duration": (5, 20),
+        "buy_bias": 0.95,
+        "sell_bias": 0.05,
+        "volatility_multiplier": 4.0,
+        "liquidity_multiplier": 0.2,
+        "spread_multiplier": 5.0,
+        "whale_activity_multiplier": 2.0,
+        "momentum_multiplier": 2.5,
+        "mean_reversion_multiplier": 0.2,
+        "maker_cancel_multiplier": 3.5,
+        "gap_probability": 0.55,
+    },
+    "post_whale_consolidation": {
+        "duration": (30, 80),
+        "buy_bias": 0.50,
+        "sell_bias": 0.50,
+        "volatility_multiplier": 0.2,
+        "liquidity_multiplier": 0.5,
+        "spread_multiplier": 2.5,
+        "whale_activity_multiplier": 0.4,
+        "momentum_multiplier": 0.5,
+        "mean_reversion_multiplier": 1.0,
+        "maker_cancel_multiplier": 1.8,
+        "gap_probability": 0.35,
+    },
+}
 
 
 def _utc_now() -> str:
@@ -106,6 +217,23 @@ class WhaleMoodState:
 
 
 @dataclass(slots=True)
+class RegimeRuntimeState:
+    name: str
+    ticks_remaining: int
+    buy_bias: float
+    sell_bias: float
+    volatility_multiplier: float
+    liquidity_multiplier: float
+    spread_multiplier: float
+    whale_activity_multiplier: float
+    momentum_multiplier: float
+    mean_reversion_multiplier: float
+    maker_cancel_multiplier: float
+    gap_probability: float
+    reason: str | None = None
+
+
+@dataclass(slots=True)
 class GameRuntimeState:
     mode: str | None = None
     status: str = "idle"
@@ -150,6 +278,7 @@ class LiveSessionState:
     preload_pattern: str
     rival_whales: list[RivalWhaleState]
     whale_mood: WhaleMoodState
+    market_regime: RegimeRuntimeState
     next_cash_growth_tick: int
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
@@ -218,6 +347,7 @@ class LiveSimulationService:
         history_size = _history_size_for()
         preloaded_tick_count = _preloaded_tick_count()
         preload_pattern = _choose_preload_pattern(rng)
+        market_regime = _build_initial_market_regime(preload_pattern=preload_pattern, rng=rng)
 
         session = LiveSessionState(
             session_id=f"live-{config.seed}-{uuid4().hex[:8]}",
@@ -240,6 +370,7 @@ class LiveSimulationService:
             preload_pattern=preload_pattern,
             rival_whales=rival_whales,
             whale_mood=whale_mood,
+            market_regime=market_regime,
             next_cash_growth_tick=MONEY_GROWTH_INTERVAL_TICKS,
             price_history=deque([order_book.mid_price or config.initial_price], maxlen=history_size),
             ohlcv_history=deque(maxlen=history_size),
@@ -473,6 +604,7 @@ class LiveSimulationService:
 
     def _advance_session_locked(self, session: LiveSessionState) -> None:
         session.tick += 1
+        self._advance_market_regime_locked(session)
         self._roll_whale_mood_locked(session)
         self._apply_cash_growth_locked(session)
         session.order_book.expire_orders()
@@ -484,7 +616,7 @@ class LiveSimulationService:
         )
         session.order_book.cancel_random_orders(
             rng=session.rng,
-            max_ratio=0.18,
+            max_ratio=min(0.10 * session.market_regime.maker_cancel_multiplier, 0.45),
             min_age_ticks=1,
             current_tick=session.tick,
             strategy_type=StrategyType.MARKET_MAKER.value,
@@ -553,19 +685,23 @@ class LiveSimulationService:
                 + session.structural_bias_bps
                 + _preload_pattern_bias_bps(session)
                 + _market_mood_bias_bps(session)
+                + _market_regime_drift_bps(session)
                 + rival_pressure_bps
                 + session.rng.uniform(-0.8, 0.8),
-                16.0,
+                16.0 * session.market_regime.volatility_multiplier,
             ),
-            -14.0,
+            -14.0 * session.market_regime.volatility_multiplier,
         )
         reference_price = max(price_before * (1 + drift_bps / 10_000), 1.0)
         session.order_book.ensure_depth_around(
             reference_price,
-            base_quantity=_base_liquidity_for_bias(session.structural_bias_bps),
+            base_quantity=_base_liquidity_for_bias(session.structural_bias_bps) * session.market_regime.liquidity_multiplier,
             created_tick=session.tick,
             ttl_ticks=8,
             strategy_type=StrategyType.MARKET_MAKER.value,
+            spacing_bps=10.0 * session.market_regime.spread_multiplier,
+            rng=session.rng,
+            gap_probability=session.market_regime.gap_probability,
         )
         price_after = session.order_book.mid_price or reference_price
         session.last_price = round(price_after, 4)
@@ -583,6 +719,12 @@ class LiveSimulationService:
                 ((price_after - price_before) / price_before) * 10_000,
                 4,
             )
+
+        _handle_market_regime_reaction_locked(
+            session,
+            price_change_bps=price_change_bps,
+            trades_executed=trades_executed,
+        )
 
         session.last_tick = TickReport(
             tick=session.tick,
@@ -737,6 +879,13 @@ class LiveSimulationService:
             whale_impact_bps=price_impact_bps,
         )
         self._record_whale_game_activity_locked(session, whale_order)
+        _handle_player_whale_regime_shock_locked(
+            session,
+            side=side,
+            requested_notional=notional,
+            remaining_side_depth=remaining_side_depth,
+            matched_notional=result.matched_notional,
+        )
         self._update_game_state_locked(session)
 
         whale_balance = self._build_whale_balance_snapshot(session)
@@ -767,13 +916,17 @@ class LiveSimulationService:
             if session.tick - whale.last_action_tick <= whale.cooldown_ticks:
                 continue
 
-            activation_threshold = min(0.12 + abs(mood_bias) * 0.24 + whale.aggression * 0.05, 0.54)
+            activation_threshold = min(
+                (0.12 + abs(mood_bias) * 0.24 + whale.aggression * 0.05)
+                * session.market_regime.whale_activity_multiplier,
+                0.72,
+            )
             if session.rng.random() > activation_threshold:
                 continue
 
             side = OrderSide.BUY if session.rng.random() < _market_buy_probability(session, mood_bias) else OrderSide.SELL
             notional_equity = max(abs(whale.total_equity(current_price)), current_price * 120)
-            leverage_multiplier = 1 + whale.leverage_limit * (0.45 + abs(mood_bias))
+            leverage_multiplier = 1 + whale.leverage_limit * (0.45 + abs(mood_bias)) * session.market_regime.volatility_multiplier
 
             if side == OrderSide.BUY:
                 requested_notional = max(
@@ -985,6 +1138,7 @@ class LiveSimulationService:
             recent_mid_prices=list(session.price_history),
             ohlcv_history=list(session.ohlcv_history),
             last_tick=session.last_tick,
+            market_regime=self._build_market_regime_snapshot(session.market_regime),
             whale_balance=self._build_whale_balance_snapshot(session),
             last_whale_order=session.last_whale_order,
             top_agents=self._build_top_agents(session),
@@ -1012,6 +1166,31 @@ class LiveSimulationService:
             initial_total_equity=round(session.whale_initial_total_equity, 6),
             total_equity=round(whale_balance.total_equity(session.last_price), 6),
         )
+
+    def _build_market_regime_snapshot(self, regime: RegimeRuntimeState) -> MarketRegimeState:
+        return MarketRegimeState(
+            name=regime.name,
+            ticks_remaining=regime.ticks_remaining,
+            buy_bias=regime.buy_bias,
+            sell_bias=regime.sell_bias,
+            volatility_multiplier=regime.volatility_multiplier,
+            liquidity_multiplier=regime.liquidity_multiplier,
+            spread_multiplier=regime.spread_multiplier,
+            whale_activity_multiplier=regime.whale_activity_multiplier,
+            momentum_multiplier=regime.momentum_multiplier,
+            mean_reversion_multiplier=regime.mean_reversion_multiplier,
+            maker_cancel_multiplier=regime.maker_cancel_multiplier,
+            gap_probability=regime.gap_probability,
+            reason=regime.reason,
+        )
+
+    def _advance_market_regime_locked(self, session: LiveSessionState) -> None:
+        session.market_regime.ticks_remaining = max(session.market_regime.ticks_remaining - 1, 0)
+        if session.market_regime.ticks_remaining > 0:
+            return
+
+        next_regime = _pick_next_market_regime(session.market_regime.name, session.rng)
+        session.market_regime = _build_market_regime(next_regime, rng=session.rng, reason="timer_transition")
 
     def _append_ohlcv_bar(
         self,
@@ -1204,6 +1383,50 @@ def _ttl_for_strategy(strategy: StrategyType, rng: Random) -> int:
     return rng.randint(4, 8)
 
 
+def _build_initial_market_regime(*, preload_pattern: str, rng: Random) -> RegimeRuntimeState:
+    mapping = {
+        "bullish": "accumulation",
+        "bearish": "distribution",
+        "lateral": "neutral",
+        "mixed": "neutral",
+    }
+    return _build_market_regime(mapping.get(preload_pattern, "neutral"), rng=rng, reason="initial_seed")
+
+
+def _build_market_regime(name: str, *, rng: Random, reason: str | None) -> RegimeRuntimeState:
+    params = REGIME_PARAMS[name]
+    duration_min, duration_max = params["duration"]
+    return RegimeRuntimeState(
+        name=name,
+        ticks_remaining=rng.randint(duration_min, duration_max),
+        buy_bias=params["buy_bias"],
+        sell_bias=params["sell_bias"],
+        volatility_multiplier=params["volatility_multiplier"],
+        liquidity_multiplier=params["liquidity_multiplier"],
+        spread_multiplier=params["spread_multiplier"],
+        whale_activity_multiplier=params["whale_activity_multiplier"],
+        momentum_multiplier=params["momentum_multiplier"],
+        mean_reversion_multiplier=params["mean_reversion_multiplier"],
+        maker_cancel_multiplier=params["maker_cancel_multiplier"],
+        gap_probability=params["gap_probability"],
+        reason=reason,
+    )
+
+
+def _pick_next_market_regime(current_name: str, rng: Random) -> str:
+    transitions = {
+        "neutral": ["accumulation", "distribution", "neutral", "uptrend", "downtrend"],
+        "accumulation": ["uptrend", "neutral", "distribution"],
+        "uptrend": ["uptrend", "distribution", "neutral"],
+        "distribution": ["downtrend", "neutral", "accumulation"],
+        "downtrend": ["downtrend", "accumulation", "neutral"],
+        "panic": ["post_whale_consolidation", "neutral", "accumulation"],
+        "short_squeeze": ["post_whale_consolidation", "distribution", "neutral"],
+        "post_whale_consolidation": ["neutral", "accumulation", "distribution"],
+    }
+    return rng.choice(transitions.get(current_name, ["neutral"]))
+
+
 def _decide_side(
     session: LiveSessionState,
     profile: AgentProfile,
@@ -1227,7 +1450,7 @@ def _decide_side(
 
     strategy = profile.strategy
     if strategy == StrategyType.NOISE:
-        return OrderSide.BUY if rng.random() < 0.5 else OrderSide.SELL
+        return OrderSide.BUY if rng.random() < session.market_regime.buy_bias else OrderSide.SELL
 
     if strategy == StrategyType.MOMENTUM:
         if price_bias > 0.0006:
@@ -1238,7 +1461,8 @@ def _decide_side(
             runtime.intent_side = -1
             runtime.intent_ticks_remaining = rng.randint(5, 12)
             return OrderSide.SELL
-        return OrderSide.BUY if rng.random() < 0.56 else OrderSide.SELL
+        regime_buy = min(max(session.market_regime.buy_bias + 0.06, 0.08), 0.92)
+        return OrderSide.BUY if rng.random() < regime_buy else OrderSide.SELL
 
     if strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
         if price_bias > 0.0010 or fair_value_gap > 0.0013:
@@ -1262,7 +1486,7 @@ def _decide_side(
             if abs(price_bias) > 0.0004:
                 runtime.directional_side = 1 if price_bias > 0 else -1
             else:
-                runtime.directional_side = 1 if rng.random() < 0.5 else -1
+                runtime.directional_side = 1 if rng.random() < session.market_regime.buy_bias else -1
 
         runtime.directional_ticks_remaining = max(runtime.directional_ticks_remaining - 1, 0)
         runtime.intent_side = runtime.directional_side
@@ -1304,6 +1528,11 @@ def _buy_notional(
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.75, 1.25)
     ratio *= runtime.risk_appetite
+    if profile.strategy in {StrategyType.MOMENTUM, StrategyType.DIRECTIONAL_FUND, StrategyType.AGGRESSIVE_WHALE}:
+        ratio *= session.market_regime.momentum_multiplier
+    if profile.strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        ratio *= session.market_regime.mean_reversion_multiplier
+    ratio *= session.market_regime.volatility_multiplier
     return round(max(0.0, cash_free * ratio), 6)
 
 
@@ -1329,6 +1558,11 @@ def _sell_quantity(
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.7, 1.2)
     ratio *= runtime.risk_appetite
+    if profile.strategy in {StrategyType.MOMENTUM, StrategyType.DIRECTIONAL_FUND, StrategyType.AGGRESSIVE_WHALE}:
+        ratio *= session.market_regime.momentum_multiplier
+    if profile.strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        ratio *= session.market_regime.mean_reversion_multiplier
+    ratio *= session.market_regime.volatility_multiplier
     return round(max(0.0, asset_free * min(ratio, 0.35)), 6)
 
 
@@ -1341,13 +1575,13 @@ def _should_use_market_order(
     if profile.strategy == StrategyType.NOISE:
         return session.rng.random() < 0.18
     if profile.strategy == StrategyType.MOMENTUM:
-        return session.rng.random() < (0.35 + mood_bias * 0.18)
+        return session.rng.random() < min((0.30 + mood_bias * 0.18) * session.market_regime.momentum_multiplier, 0.92)
     if profile.strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
         return session.rng.random() < 0.12
     if profile.strategy == StrategyType.MARKET_MAKER:
         return False
     if profile.strategy == StrategyType.DIRECTIONAL_FUND:
-        return session.rng.random() < (0.46 + mood_bias * 0.22)
+        return session.rng.random() < min((0.42 + mood_bias * 0.22) * session.market_regime.momentum_multiplier, 0.96)
     if profile.strategy == StrategyType.AGGRESSIVE_WHALE:
         return True
     return session.rng.random() < 0.2
@@ -1541,8 +1775,51 @@ def _market_mood_bias_bps(session: LiveSessionState) -> float:
 
 
 def _market_buy_probability(session: LiveSessionState, mood_bias: float) -> float:
-    probability = 0.5 + mood_bias * 0.34 + session.rng.uniform(-0.08, 0.08)
+    probability = session.market_regime.buy_bias + mood_bias * 0.18 + session.rng.uniform(-0.08, 0.08)
     return max(min(probability, 0.94), 0.06)
+
+
+def _market_regime_drift_bps(session: LiveSessionState) -> float:
+    return round((session.market_regime.buy_bias - session.market_regime.sell_bias) * 7.5, 4)
+
+
+def _handle_market_regime_reaction_locked(
+    session: LiveSessionState,
+    *,
+    price_change_bps: float,
+    trades_executed: int,
+) -> None:
+    if price_change_bps <= PANIC_PRICE_CHANGE_BPS:
+        session.market_regime = _build_market_regime("panic", rng=session.rng, reason="support_break_panic")
+        return
+
+    if price_change_bps >= SHORT_SQUEEZE_PRICE_CHANGE_BPS:
+        session.market_regime = _build_market_regime("short_squeeze", rng=session.rng, reason="resistance_break_squeeze")
+        return
+
+    if trades_executed >= 40 and abs(price_change_bps) >= 45:
+        next_regime = "uptrend" if price_change_bps > 0 else "downtrend"
+        session.market_regime = _build_market_regime(next_regime, rng=session.rng, reason="breakout_volume")
+
+
+def _handle_player_whale_regime_shock_locked(
+    session: LiveSessionState,
+    *,
+    side: OrderSide,
+    requested_notional: float,
+    remaining_side_depth: float,
+    matched_notional: float,
+) -> None:
+    consumed_visible_liquidity = False
+    pre_shock_depth = max(remaining_side_depth + matched_notional / max(session.last_price, 1e-9), 1e-9)
+    if pre_shock_depth > 0:
+        consumed_visible_liquidity = (matched_notional / max(session.last_price, 1e-9)) >= pre_shock_depth * 0.05
+
+    if requested_notional < WHALE_SHOCK_THRESHOLD_USD and not consumed_visible_liquidity:
+        return
+
+    reason = "whale_buy_shock" if side == OrderSide.BUY else "whale_sell_shock"
+    session.market_regime = _build_market_regime("post_whale_consolidation", rng=session.rng, reason=reason)
 
 
 def _preloaded_tick_count() -> int:

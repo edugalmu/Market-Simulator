@@ -305,6 +305,7 @@ Campos principales:
 - `last_tick`: resumen del ultimo tick ejecutado.
 - `whale_balance.initial_cash`, `initial_asset`, `initial_mark_price` e `initial_total_equity`: baseline inicial de la ballena para P&L y reparto de capital.
 - `top_agents`: ranking resumido de los diez agentes con mayor equity actual, pensado para la UI DEV.
+- `market_regime`: estado de régimen activo con sesgos, multiplicadores, probabilidad de gaps y `reason` para explicar transiciones o shocks.
 - `game`: estado del reto local actual con `mode`, `status`, `duration_ticks`, `remaining_ticks`, `score`, `score_breakdown` y `final_result` cuando aplique.
 
 ## POST /api/v1/simulation/live/game/start

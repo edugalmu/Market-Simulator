@@ -78,6 +78,22 @@ export type TickReport = {
   mid_price: number
 }
 
+export type MarketRegimeState = {
+  name: string
+  ticks_remaining: number
+  buy_bias: number
+  sell_bias: number
+  volatility_multiplier: number
+  liquidity_multiplier: number
+  spread_multiplier: number
+  whale_activity_multiplier: number
+  momentum_multiplier: number
+  mean_reversion_multiplier: number
+  maker_cancel_multiplier: number
+  gap_probability: number
+  reason: string | null
+}
+
 export type OhlcvBar = {
   tick: number
   open: number
@@ -150,6 +166,7 @@ export type LiveSimulationSnapshot = {
   recent_mid_prices: number[]
   ohlcv_history: OhlcvBar[]
   last_tick: TickReport | null
+  market_regime: MarketRegimeState
   whale_balance: WhaleBalanceSnapshot
   last_whale_order: LiveWhaleOrderOutcome | null
   top_agents: TopAgentEntry[]
