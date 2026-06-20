@@ -105,6 +105,12 @@
   align-items: end;
 }
 
+.market-toolbar__side {
+  display: grid;
+  gap: 0.9rem;
+  align-self: stretch;
+}
+
 .simulation-box {
   display: grid;
   gap: 0.9rem;
@@ -394,6 +400,20 @@
   border-radius: 1.1rem;
   border: 1px solid rgba(236, 138, 32, 0.16);
   background: rgba(255, 255, 255, 0.04);
+}
+
+.capital-overview-card--top {
+  padding: 0.8rem 0.95rem;
+  border-radius: 1rem;
+}
+
+.capital-overview-card--top .capital-overview-card__visual {
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr);
+  gap: 0.8rem;
+}
+
+.capital-overview-card--top .capital-donut--compact {
+  max-width: 132px;
 }
 
 .capital-overview-card__copy {
@@ -1200,6 +1220,10 @@
 
   .market-toolbar__top {
     grid-template-columns: 1fr;
+  }
+
+  .market-toolbar__side {
+    align-self: stretch;
   }
 
   .timeframe-selector--market {

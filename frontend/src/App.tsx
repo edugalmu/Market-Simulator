@@ -216,29 +216,56 @@ function App() {
                 ) : null}
               </div>
 
-              <div className="timeframe-selector timeframe-selector--market" role="group" aria-label="Selector de marco temporal de velas">
-                <span className="timeframe-selector__label">Velas</span>
-                <div className="timeframe-selector__actions timeframe-selector__actions--chart">
-                  {TIMEFRAME_OPTIONS.map((timeframe) => {
-                    const isSelected = selectedTimeframe === timeframe
-                    const buttonClassName = [
-                      'timeframe-button',
-                      isSelected ? 'timeframe-button--selected' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')
+              <div className="market-toolbar__side">
+                <section className="capital-overview-card capital-overview-card--top" aria-label="Capital total del mercado">
+                  <div className="capital-overview-card__visual">
+                    <div className="capital-donut capital-donut--compact" style={capitalDonutStyle}>
+                      <div className="capital-donut__center">
+                        <span>Ballena</span>
+                        <strong>{formatPercent(whaleCapitalShare)}</strong>
+                      </div>
+                    </div>
+                    <div className="capital-overview-card__stats">
+                      <div className="capital-overview-card__row">
+                        <span>Agentes</span>
+                        <strong>{totalAgentEquity !== null ? formatCurrency(totalAgentEquity) : '--'}</strong>
+                      </div>
+                      <div className="capital-overview-card__row">
+                        <span>Ballena</span>
+                        <strong>{whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}</strong>
+                      </div>
+                      <div className="capital-overview-card__row">
+                        <span>Total</span>
+                        <strong>{totalVisibleCapital !== null ? formatCurrency(totalVisibleCapital) : '--'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-                    return (
-                      <button
-                        key={timeframe}
-                        className={buttonClassName}
-                        onClick={() => setSelectedTimeframe(timeframe)}
-                        type="button"
-                      >
-                        {formatTimeframeOptionLabel(timeframe)}
-                      </button>
-                    )
-                  })}
+                <div className="timeframe-selector timeframe-selector--market" role="group" aria-label="Selector de marco temporal de velas">
+                  <span className="timeframe-selector__label">Velas</span>
+                  <div className="timeframe-selector__actions timeframe-selector__actions--chart">
+                    {TIMEFRAME_OPTIONS.map((timeframe) => {
+                      const isSelected = selectedTimeframe === timeframe
+                      const buttonClassName = [
+                        'timeframe-button',
+                        isSelected ? 'timeframe-button--selected' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')
+
+                      return (
+                        <button
+                          key={timeframe}
+                          className={buttonClassName}
+                          onClick={() => setSelectedTimeframe(timeframe)}
+                          type="button"
+                        >
+                          {formatTimeframeOptionLabel(timeframe)}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -324,39 +351,6 @@ function App() {
               <strong className="position-pill__value">{whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}</strong>
             </div>
           </div>
-
-          <section className="capital-overview-card" aria-label="Capital total del mercado">
-            <div className="capital-overview-card__copy">
-              <p className="challenge-card__eyebrow">Capital total</p>
-              <h3 className="capital-overview-card__title">Reparto visible del mercado</h3>
-              <p className="capital-overview-card__note">
-                Agentes y ballena se reparten el capital total visible. La ballena parte con alrededor del 20%.
-              </p>
-            </div>
-
-            <div className="capital-overview-card__visual">
-              <div className="capital-donut capital-donut--compact" style={capitalDonutStyle}>
-                <div className="capital-donut__center">
-                  <span>Ballena</span>
-                  <strong>{formatPercent(whaleCapitalShare)}</strong>
-                </div>
-              </div>
-              <div className="capital-overview-card__stats">
-                <div className="capital-overview-card__row">
-                  <span>Agentes</span>
-                  <strong>{totalAgentEquity !== null ? formatCurrency(totalAgentEquity) : '--'}</strong>
-                </div>
-                <div className="capital-overview-card__row">
-                  <span>Ballena</span>
-                  <strong>{whaleBalance ? formatCurrency(whaleBalance.total_equity) : '--'}</strong>
-                </div>
-                <div className="capital-overview-card__row">
-                  <span>Total</span>
-                  <strong>{totalVisibleCapital !== null ? formatCurrency(totalVisibleCapital) : '--'}</strong>
-                </div>
-              </div>
-            </div>
-          </section>
 
           <PriceChart
             prices={chartPrices}
