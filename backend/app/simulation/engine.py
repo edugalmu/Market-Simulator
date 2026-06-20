@@ -213,7 +213,7 @@ class SimulationEngine:
         ledger = Ledger.from_profiles(profiles)
 
         order_book = OrderBook()
-        order_book.seed_around(config.initial_price)
+        order_book.seed_around(config.initial_price, ttl_ticks=24)
 
         return active_backend, profiles, ledger, order_book
 

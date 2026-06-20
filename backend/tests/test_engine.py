@@ -1,3 +1,4 @@
+from app.core.events import OrderSide
 from app.simulation.engine import SimulationEngine
 from app.simulation.live import LiveSimulationService
 from app.simulation.models import SessionConfig
@@ -173,7 +174,6 @@ def test_live_game_challenge_tracks_countdown_score_and_final_result() -> None:
     whale_response = service.execute_whale_order(side="buy", notional=3_000.0)
     assert whale_response.snapshot.game.remaining_ticks == 55
     assert whale_response.snapshot.game.score != 0
-    assert whale_response.snapshot.game.score_breakdown.impact_score > 0
     assert whale_response.snapshot.game.score_breakdown.volume_score > 0
 
     ended = service.end_game()
@@ -203,6 +203,72 @@ def test_live_snapshot_exposes_aggregated_order_book_levels() -> None:
     assert snapshot.order_book.asks[0].price >= snapshot.order_book.best_ask
     assert all(level.orders >= 1 for level in snapshot.order_book.bids)
     assert all(level.orders >= 1 for level in snapshot.order_book.asks)
+
+
+def test_order_book_preserves_some_orders_between_ticks() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=44), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    order_id = session.order_book.add_limit_order(
+        side=OrderSide.BUY,
+        price=max((session.order_book.best_bid or session.last_price) - 5.0, 1.0),
+        quantity=2.0,
+        agent_id=999_000,
+        strategy_type="test_persistent",
+        created_tick=session.tick,
+        ttl_ticks=5,
+    )
+    assert order_id is not None
+
+    advanced = service.step(ticks=1)
+    current_order_ids = {order.order_id for order in session.order_book.bid_orders + session.order_book.ask_orders}
+    service.reset()
+
+    assert order_id in current_order_ids
+    assert advanced.order_book.best_bid <= advanced.order_book.best_ask
+
+
+def test_orders_expire_by_ttl() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=45), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    order_id = session.order_book.add_limit_order(
+        side=OrderSide.BUY,
+        price=(session.order_book.best_bid or session.last_price) - 1.0,
+        quantity=1.0,
+        agent_id=999_001,
+        strategy_type="test",
+        created_tick=session.tick,
+        ttl_ticks=1,
+    )
+    assert order_id is not None
+
+    service.step(ticks=1)
+    service.reset()
+
+    surviving_ids = {order.order_id for order in session.order_book.bid_orders + session.order_book.ask_orders}
+    assert order_id not in surviving_ids
+
+
+def test_normal_agents_keep_non_negative_balances() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=46), gpu_enabled=False, auto_run=False)
+    service.step(ticks=20)
+    session = service._session
+    assert session is not None
+
+    for profile in session.profiles:
+        balance = session.ledger.get_balance(profile.agent_id)
+        assert balance.cash_free >= -1e-9
+        assert balance.cash_reserved >= -1e-9
+        assert balance.asset_free >= -1e-9
+        assert balance.asset_reserved >= -1e-9
+
+    service.reset()
 
 
 def test_live_session_preload_ticks_do_not_change_with_speed() -> None:

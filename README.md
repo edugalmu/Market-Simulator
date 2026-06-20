@@ -16,6 +16,7 @@ Implementado y verificable en el repositorio:
 - Grafica principal con OHLCV real por tick desde backend en la UI, con agrupacion visual 1s/5s/10s/30s/1 min, ventana reciente limitada para no saturar la vista y fallback local si aun faltan barras suficientes.
 - Primer minijuego local `Whale Challenge - 60 segundos` con score, contador, resumen final y reinicio sobre la misma sesion viva.
 - Panel DEV de `Order Book` con bids/asks agregados, spread y profundidad visible desde el snapshot vivo.
+- El `Order Book` de la sesion viva ahora persiste entre ticks: envejece, expira por TTL, se consume con market orders y se refresca de forma parcial.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.

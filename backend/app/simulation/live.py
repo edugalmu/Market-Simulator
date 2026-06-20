@@ -66,8 +66,19 @@ class AgentRuntimeState:
     aggression_level: float
     cooldown_ticks: int
     last_action_tick: int = -10_000
+    intent_side: int = 0
+    intent_ticks_remaining: int = 0
+    risk_appetite: float = 1.0
+    inventory_target: float = 0.0
     directional_side: int = 0
     directional_ticks_remaining: int = 0
+
+
+@dataclass(slots=True)
+class AgentActionResult:
+    side: OrderSide
+    match_result: MatchResult | None = None
+    placed_limit: bool = False
 
 
 @dataclass(slots=True)
@@ -240,6 +251,8 @@ class LiveSimulationService:
                     ),
                     aggression_level=round(rng.uniform(0.7, 1.3), 4),
                     cooldown_ticks=_cooldown_for(profile.strategy),
+                    risk_appetite=round(rng.uniform(0.85, 1.45), 4),
+                    inventory_target=round(config.initial_asset * rng.uniform(0.35, 1.65), 4),
                 )
                 for profile in profiles
             },
@@ -462,6 +475,20 @@ class LiveSimulationService:
         session.tick += 1
         self._roll_whale_mood_locked(session)
         self._apply_cash_growth_locked(session)
+        session.order_book.expire_orders()
+        session.order_book.cancel_random_orders(
+            rng=session.rng,
+            max_ratio=0.03,
+            min_age_ticks=4,
+            current_tick=session.tick,
+        )
+        session.order_book.cancel_random_orders(
+            rng=session.rng,
+            max_ratio=0.18,
+            min_age_ticks=1,
+            current_tick=session.tick,
+            strategy_type=StrategyType.MARKET_MAKER.value,
+        )
         price_before = session.last_price
         short_anchor = sum(session.price_history) / len(session.price_history)
         active_count = select_active_agent_count(
@@ -500,11 +527,11 @@ class LiveSimulationService:
             else:
                 sell_orders += 1
 
-            trades_executed += result.trades_executed
-            matched_notional += result.matched_notional
-            matched_quantity += result.quantity_matched
-            if result.average_fill_price > 0:
-                observed_prices.append(result.average_fill_price)
+            if result.match_result is not None:
+                trades_executed += result.match_result.trades_executed
+                matched_notional += result.match_result.matched_notional
+                matched_quantity += result.match_result.quantity_matched
+                observed_prices.append(session.order_book.mid_price or result.match_result.average_fill_price or price_before)
 
         rival_flow = self._execute_rival_whales_locked(
             session,
@@ -533,9 +560,12 @@ class LiveSimulationService:
             -14.0,
         )
         reference_price = max(price_before * (1 + drift_bps / 10_000), 1.0)
-        session.order_book.seed_around(
+        session.order_book.ensure_depth_around(
             reference_price,
             base_quantity=_base_liquidity_for_bias(session.structural_bias_bps),
+            created_tick=session.tick,
+            ttl_ticks=8,
+            strategy_type=StrategyType.MARKET_MAKER.value,
         )
         price_after = session.order_book.mid_price or reference_price
         session.last_price = round(price_after, 4)
@@ -652,8 +682,6 @@ class LiveSimulationService:
                 ((price_after - price_before) / price_before) * 10_000,
                 4,
             )
-        if result.average_fill_price > 0:
-            observed_prices.append(result.average_fill_price)
         observed_prices.append(price_after)
 
         session.tick += 1
@@ -739,7 +767,7 @@ class LiveSimulationService:
             if session.tick - whale.last_action_tick <= whale.cooldown_ticks:
                 continue
 
-            activation_threshold = min(0.38 + abs(mood_bias) * 0.42 + whale.aggression * 0.08, 0.96)
+            activation_threshold = min(0.12 + abs(mood_bias) * 0.24 + whale.aggression * 0.05, 0.54)
             if session.rng.random() > activation_threshold:
                 continue
 
@@ -749,8 +777,8 @@ class LiveSimulationService:
 
             if side == OrderSide.BUY:
                 requested_notional = max(
-                    750.0,
-                    notional_equity * whale.aggression * session.rng.uniform(0.08, 0.18) * leverage_multiplier,
+                    450.0,
+                    notional_equity * whale.aggression * session.rng.uniform(0.004, 0.012) * leverage_multiplier,
                 )
                 result = execute_market_buy_by_notional(
                     session.order_book,
@@ -762,10 +790,10 @@ class LiveSimulationService:
                 buy_orders += 1
             else:
                 requested_quantity = max(
-                    5.0,
+                    2.0,
                     (notional_equity / max(current_price, 1e-9))
                     * whale.aggression
-                    * session.rng.uniform(0.08, 0.18)
+                    * session.rng.uniform(0.004, 0.012)
                     * leverage_multiplier,
                 )
                 result = execute_market_order(
@@ -782,8 +810,7 @@ class LiveSimulationService:
             trades_executed += result.trades_executed
             matched_notional += result.matched_notional
             matched_quantity += result.quantity_matched
-            if result.average_fill_price > 0:
-                observed_prices.append(result.average_fill_price)
+            observed_prices.append(session.order_book.mid_price or result.average_fill_price or current_price)
 
             direction_sign = 1 if side == OrderSide.BUY else -1
             pressure_bps += direction_sign * min(result.matched_notional / 12_500, 8.5) * (0.8 + abs(mood_bias))
@@ -827,7 +854,7 @@ class LiveSimulationService:
         *,
         current_price: float,
         anchor_price: float,
-    ) -> MatchResult | None:
+    ) -> AgentActionResult | None:
         runtime.fair_value_estimate = round(
             runtime.fair_value_estimate * 0.995
             + current_price * 0.005
@@ -846,10 +873,31 @@ class LiveSimulationService:
             return None
 
         balance = session.ledger.get_balance(profile.agent_id)
+        use_market_order = _should_use_market_order(session, profile, runtime)
         if side == OrderSide.BUY:
             notional = _buy_notional(session, profile, runtime, cash_free=balance.cash_free)
             if notional <= 1e-9:
                 return None
+
+            if not use_market_order:
+                limit_price = _build_limit_price(
+                    side=side,
+                    current_price=current_price,
+                    best_bid=session.order_book.best_bid,
+                    best_ask=session.order_book.best_ask,
+                    strategy=profile.strategy,
+                    rng=session.rng,
+                )
+                session.order_book.add_limit_order(
+                    side=side,
+                    price=limit_price,
+                    quantity=max(notional / max(current_price, 1e-9), 0.0001),
+                    agent_id=profile.agent_id,
+                    strategy_type=profile.strategy.value,
+                    created_tick=session.tick,
+                    ttl_ticks=_ttl_for_strategy(profile.strategy, session.rng),
+                )
+                return AgentActionResult(side=side, placed_limit=True)
 
             session.ledger.reserve_cash(profile.agent_id, notional)
             result = execute_market_buy_by_notional(
@@ -866,11 +914,31 @@ class LiveSimulationService:
                 profile.agent_id,
                 session.ledger.get_balance(profile.agent_id).cash_reserved,
             )
-            return result if result.trades_executed > 0 else None
+            return AgentActionResult(side=side, match_result=result) if result.trades_executed > 0 else None
 
         quantity = _sell_quantity(session, profile, runtime, asset_free=balance.asset_free)
         if quantity <= 1e-9:
             return None
+
+        if not use_market_order:
+            limit_price = _build_limit_price(
+                side=side,
+                current_price=current_price,
+                best_bid=session.order_book.best_bid,
+                best_ask=session.order_book.best_ask,
+                strategy=profile.strategy,
+                rng=session.rng,
+            )
+            session.order_book.add_limit_order(
+                side=side,
+                price=limit_price,
+                quantity=quantity,
+                agent_id=profile.agent_id,
+                strategy_type=profile.strategy.value,
+                created_tick=session.tick,
+                ttl_ticks=_ttl_for_strategy(profile.strategy, session.rng),
+            )
+            return AgentActionResult(side=side, placed_limit=True)
 
         session.ledger.reserve_asset(profile.agent_id, quantity)
         result = execute_market_order(
@@ -887,7 +955,7 @@ class LiveSimulationService:
             profile.agent_id,
             session.ledger.get_balance(profile.agent_id).asset_reserved,
         )
-        return result if result.trades_executed > 0 else None
+        return AgentActionResult(side=side, match_result=result) if result.trades_executed > 0 else None
 
     def _build_snapshot(self, session: LiveSessionState) -> LiveSimulationSnapshot:
         fallback_price = session.last_price
@@ -1122,6 +1190,20 @@ def _cooldown_for(strategy: StrategyType) -> int:
     return 3
 
 
+def _ttl_for_strategy(strategy: StrategyType, rng: Random) -> int:
+    if strategy == StrategyType.NOISE:
+        return rng.randint(2, 5)
+    if strategy in {StrategyType.MOMENTUM, StrategyType.DIRECTIONAL_FUND}:
+        return rng.randint(4, 10)
+    if strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        return rng.randint(8, 18)
+    if strategy == StrategyType.MARKET_MAKER:
+        return rng.randint(5, 9)
+    if strategy == StrategyType.AGGRESSIVE_WHALE:
+        return rng.randint(2, 4)
+    return rng.randint(4, 8)
+
+
 def _decide_side(
     session: LiveSessionState,
     profile: AgentProfile,
@@ -1139,21 +1221,33 @@ def _decide_side(
     if runtime.fair_value_estimate > 0:
         fair_value_gap = (current_price - runtime.fair_value_estimate) / runtime.fair_value_estimate
 
+    if runtime.intent_ticks_remaining > 0 and runtime.intent_side != 0:
+        runtime.intent_ticks_remaining = max(runtime.intent_ticks_remaining - 1, 0)
+        return OrderSide.BUY if runtime.intent_side > 0 else OrderSide.SELL
+
     strategy = profile.strategy
     if strategy == StrategyType.NOISE:
         return OrderSide.BUY if rng.random() < 0.5 else OrderSide.SELL
 
     if strategy == StrategyType.MOMENTUM:
         if price_bias > 0.0006:
+            runtime.intent_side = 1
+            runtime.intent_ticks_remaining = rng.randint(5, 12)
             return OrderSide.BUY
         if price_bias < -0.0006:
+            runtime.intent_side = -1
+            runtime.intent_ticks_remaining = rng.randint(5, 12)
             return OrderSide.SELL
         return OrderSide.BUY if rng.random() < 0.56 else OrderSide.SELL
 
     if strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
         if price_bias > 0.0010 or fair_value_gap > 0.0013:
+            runtime.intent_side = -1
+            runtime.intent_ticks_remaining = rng.randint(6, 14)
             return OrderSide.SELL
         if price_bias < -0.0010 or fair_value_gap < -0.0013:
+            runtime.intent_side = 1
+            runtime.intent_ticks_remaining = rng.randint(6, 14)
             return OrderSide.BUY
         return None
 
@@ -1171,10 +1265,14 @@ def _decide_side(
                 runtime.directional_side = 1 if rng.random() < 0.5 else -1
 
         runtime.directional_ticks_remaining = max(runtime.directional_ticks_remaining - 1, 0)
+        runtime.intent_side = runtime.directional_side
+        runtime.intent_ticks_remaining = max(runtime.directional_ticks_remaining, 1)
         return OrderSide.BUY if runtime.directional_side >= 0 else OrderSide.SELL
 
     if strategy == StrategyType.AGGRESSIVE_WHALE:
         bullish_threshold = 0.44 + max(price_bias, 0) * 120
+        runtime.intent_side = 1 if bullish_threshold >= 0.5 else -1
+        runtime.intent_ticks_remaining = rng.randint(2, 6)
         return OrderSide.BUY if rng.random() < bullish_threshold else OrderSide.SELL
 
     if fair_value_gap > 0.0015:
@@ -1205,6 +1303,7 @@ def _buy_notional(
         StrategyType.FUNDAMENTAL: 0.0010,
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.75, 1.25)
+    ratio *= runtime.risk_appetite
     return round(max(0.0, cash_free * ratio), 6)
 
 
@@ -1229,7 +1328,53 @@ def _sell_quantity(
         StrategyType.FUNDAMENTAL: 0.10,
     }[profile.strategy]
     ratio = base_ratio * runtime.aggression_level * session.rng.uniform(0.7, 1.2)
+    ratio *= runtime.risk_appetite
     return round(max(0.0, asset_free * min(ratio, 0.35)), 6)
+
+
+def _should_use_market_order(
+    session: LiveSessionState,
+    profile: AgentProfile,
+    runtime: AgentRuntimeState,
+) -> bool:
+    mood_bias = abs(_market_mood_bias(session))
+    if profile.strategy == StrategyType.NOISE:
+        return session.rng.random() < 0.18
+    if profile.strategy == StrategyType.MOMENTUM:
+        return session.rng.random() < (0.35 + mood_bias * 0.18)
+    if profile.strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        return session.rng.random() < 0.12
+    if profile.strategy == StrategyType.MARKET_MAKER:
+        return False
+    if profile.strategy == StrategyType.DIRECTIONAL_FUND:
+        return session.rng.random() < (0.46 + mood_bias * 0.22)
+    if profile.strategy == StrategyType.AGGRESSIVE_WHALE:
+        return True
+    return session.rng.random() < 0.2
+
+
+def _build_limit_price(
+    *,
+    side: OrderSide,
+    current_price: float,
+    best_bid: float | None,
+    best_ask: float | None,
+    strategy: StrategyType,
+    rng: Random,
+) -> float:
+    spread_anchor = max((best_ask or current_price) - (best_bid or current_price), 0.02)
+
+    if strategy == StrategyType.MARKET_MAKER:
+        offset = spread_anchor * rng.uniform(0.4, 1.2)
+    elif strategy in {StrategyType.MEAN_REVERSION, StrategyType.VALUE}:
+        offset = spread_anchor * rng.uniform(1.2, 2.6)
+    elif strategy == StrategyType.NOISE:
+        offset = spread_anchor * rng.uniform(0.8, 1.8)
+    else:
+        offset = spread_anchor * rng.uniform(0.25, 1.0)
+
+    price = current_price - offset if side == OrderSide.BUY else current_price + offset
+    return round(max(price, 0.01), 2)
 
 
 def _resolve_post_trade_price(
@@ -1417,10 +1562,10 @@ def _decay_bias(value: float) -> float:
 
 def _base_liquidity_for_bias(structural_bias_bps: float) -> float:
     if abs(structural_bias_bps) >= 25:
-        return 6.8
+        return 20.0
     if abs(structural_bias_bps) >= 10:
-        return 7.4
-    return 8.0
+        return 24.0
+    return 28.0
 
 
 _live_simulation_service = LiveSimulationService()
