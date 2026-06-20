@@ -496,6 +496,102 @@ def test_iceberg_does_not_leave_negative_quantities() -> None:
     assert not order_book.ask_orders
 
 
+def test_live_snapshot_includes_iceberg_summary() -> None:
+    service = LiveSimulationService()
+    snapshot = service.start(SessionConfig(seed=91), gpu_enabled=False, auto_run=False)
+    service.reset()
+
+    assert snapshot.icebergs.active >= 0
+    assert snapshot.icebergs.bid_count >= 0
+    assert snapshot.icebergs.ask_count >= 0
+
+
+def test_contextual_iceberg_spawn_respects_max_active_limit() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=92), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+    session.market_regime.name = "accumulation"
+
+    for _ in range(20):
+        service._maybe_spawn_contextual_iceberg_locked(
+            session,
+            reference_price=session.last_price,
+            force_spawn=True,
+        )
+
+    snapshot = service.get_snapshot(raise_if_missing=True)
+    service.reset()
+
+    assert snapshot.icebergs.active <= 6
+
+
+def test_contextual_iceberg_spawn_can_happen_in_accumulation() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=93), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    session.market_regime.name = "accumulation"
+    created = service._maybe_spawn_contextual_iceberg_locked(
+        session,
+        reference_price=session.last_price,
+        force_spawn=True,
+    )
+    snapshot = service.get_snapshot(raise_if_missing=True)
+    service.reset()
+
+    assert created is True
+    assert snapshot.icebergs.active >= 1
+
+
+def test_post_whale_defensive_iceberg_can_spawn() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=94), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    session.market_regime.name = "post_whale_consolidation"
+    created = service._maybe_spawn_contextual_iceberg_locked(
+        session,
+        reference_price=session.last_price,
+        preferred_side=OrderSide.BUY,
+        force_spawn=True,
+    )
+    snapshot = service.get_snapshot(raise_if_missing=True)
+    service.reset()
+
+    assert created is True
+    assert snapshot.icebergs.bid_count >= 1
+
+
+def test_iceberg_absorption_updates_recent_summary() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=95), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    session.order_book.add_iceberg_order(
+        side=OrderSide.SELL,
+        price=max(session.last_price, 1.0),
+        display_quantity=10.0,
+        hidden_quantity=50.0,
+        replenish_quantity=10.0,
+        agent_id=777,
+        strategy_type="iceberg",
+        created_tick=session.tick,
+        ttl_ticks=60,
+    )
+
+    service.execute_whale_order(side="buy", notional=2_500.0)
+    snapshot = service.get_snapshot(raise_if_missing=True)
+    service.reset()
+
+    assert snapshot.icebergs.recent_absorbed_notional > 0
+    assert snapshot.icebergs.last_absorption_price is not None
+    assert snapshot.icebergs.last_absorption_side == "ask"
+
+
 def test_live_session_whale_starts_with_one_fifth_of_total_capital() -> None:
     service = LiveSimulationService()
     snapshot = service.start(SessionConfig(seed=61), gpu_enabled=False, auto_run=False)

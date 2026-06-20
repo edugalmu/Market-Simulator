@@ -89,6 +89,15 @@ class MarketRegimeState(BaseModel):
     reason: str | None = None
 
 
+class IcebergSummary(BaseModel):
+    active: int
+    bid_count: int
+    ask_count: int
+    recent_absorbed_notional: float
+    last_absorption_price: float | None = None
+    last_absorption_side: str | None = None
+
+
 class OhlcvBar(BaseModel):
     tick: int
     open: float
@@ -182,6 +191,7 @@ class LiveSimulationSnapshot(BaseModel):
     ohlcv_history: list[OhlcvBar] = Field(default_factory=list)
     last_tick: TickReport | None = None
     market_regime: MarketRegimeState
+    icebergs: IcebergSummary
     whale_balance: WhaleBalanceSnapshot
     last_whale_order: LiveWhaleOrderOutcome | None = None
     top_agents: list[TopAgentEntry] = Field(default_factory=list)

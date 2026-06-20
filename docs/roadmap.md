@@ -74,6 +74,7 @@ Avance parcial ya implementado:
 - el modo DEV ya muestra un `Order Book` agregado con hasta 10 niveles por lado, spread y profundidad desde el snapshot vivo.
 - el libro ya no se resembra completo por tick: ahora conserva ordenes limit en memoria, aplica expiracion TTL, cancelaciones parciales y refresco gradual de liquidez.
 - la sesion viva ya expone y usa un `market_regime` real que modifica gaps, sesgos, volatilidad, liquidez y reacciones post-ballena.
+- la sesion viva ya expone un resumen `icebergs` con conteo por lado, absorcion reciente y ultimo nivel observado para paneles DEV.
 - `recent_mid_prices` se mantiene como fallback visual si todavia no hay suficientes barras para dibujar velas.
 
 ## Fase 3. Persistencia y replay

@@ -93,18 +93,20 @@ Frontend React
   -> puede iniciar y cerrar un reto local `whale_challenge` sobre la misma sesion viva
   -> puede mostrar en modo DEV el `order_book` agregado con niveles bid/ask, spread y profundidad
   -> puede mostrar en modo DEV el `market_regime` activo y sus multiplicadores
+  -> puede mostrar en modo DEV un resumen de `icebergs` activos, absorcion reciente y ultimo nivel observado
 Backend FastAPI
   -> mantiene una sesion en memoria
   -> selecciona un subconjunto activo por tick
   -> ejecuta market intents pequenos y limit orders persistentes sobre liquidez viva
   -> mantiene un libro vivo con ordenes limit que sobreviven entre ticks, expiran por TTL y se refrescan parcialmente
   -> aplica un supervisor de régimen de mercado que altera sesgo, volatilidad, spreads, gaps y actividad de ballenas rivales
+  -> puede sembrar `icebergs` contextuales y registrar absorcion reciente sin exponer la liquidez oculta completa a la UI
   -> expone tick, metricas, `recent_mid_prices` y `ohlcv_history` para la visualizacion viva
 Frontend React
   -> puede reagrupar `ohlcv_history` en ventanas 1s/5s/10s/30s/1 min para visualizacion sin cambiar motor, balances ni matching
 ```
 
-El flujo todavia no implementa persistencia durable, replay ni streaming. La sesion viva ya mantiene ordenes limit basicas en memoria con expiracion por TTL, cancelaciones parciales, market orders que consumen el libro vivo y un `market_regime` que modifica la microestructura del mercado.
+El flujo todavia no implementa persistencia durable, replay ni streaming. La sesion viva ya mantiene ordenes limit basicas en memoria con expiracion por TTL, cancelaciones parciales, market orders que consumen el libro vivo, un `market_regime` que modifica la microestructura del mercado y `icebergs` contextuales resumidos en el snapshot vivo.
 
 La visualizacion principal actual prioriza `ohlcv_history` generado por backend a razon de una barra por tick. Cada barra usa el precio inicial del tick como apertura, el precio final conocido como cierre, los precios observados durante el ciclo para maximo y minimo, `matched_quantity` como volumen y `trades_executed` como conteo de ejecuciones. La UI puede reagrupar esas barras en marcos 1s/5s/10s/30s/1 min sin recalcular fills ni balances, preservando el ultimo impacto de ballena dentro de la vela agregada correspondiente y limitando la ventana visible para no saturar la grafica. Sobre esa misma sesion viva ahora existe un minijuego local `Whale Challenge - 60 segundos`, con estado de partida y score derivados del mismo snapshot vivo. `recent_mid_prices` se mantiene solo como fallback cuando aun no hay suficientes barras para dibujar velas.
 

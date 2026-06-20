@@ -74,6 +74,7 @@ function App() {
   const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
   const liveOrderBook = liveSession?.order_book ?? null
   const marketRegime = liveSession?.market_regime ?? null
+  const liveIcebergs = liveSession?.icebergs ?? null
   const topAgents = liveSession?.top_agents ?? []
   const totalAgentEquity = liveSession?.metrics.total_agent_equity ?? null
   const initialWhaleEquity = whaleBalance?.initial_total_equity ?? null
@@ -500,6 +501,38 @@ function App() {
                     <div className="regime-card__item">
                       <span>Motivo</span>
                       <strong>{marketRegime?.reason ?? '--'}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="iceberg-card" aria-label="Icebergs">
+                  <div className="regime-card__header">
+                    <div>
+                      <p className="order-book-card__eyebrow">Icebergs</p>
+                      <h3 className="order-book-card__title">Absorción oculta</h3>
+                    </div>
+                  </div>
+
+                  <div className="regime-card__grid">
+                    <div className="regime-card__item">
+                      <span>Activos</span>
+                      <strong>{liveIcebergs ? liveIcebergs.active : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Bid / Ask</span>
+                      <strong>{liveIcebergs ? `${liveIcebergs.bid_count} / ${liveIcebergs.ask_count}` : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Absorción</span>
+                      <strong>{liveIcebergs ? formatCurrency(liveIcebergs.recent_absorbed_notional) : '--'}</strong>
+                    </div>
+                    <div className="regime-card__item">
+                      <span>Último nivel</span>
+                      <strong>
+                        {liveIcebergs && liveIcebergs.last_absorption_price !== null && liveIcebergs.last_absorption_side
+                          ? `${formatCurrency(liveIcebergs.last_absorption_price)} ${liveIcebergs.last_absorption_side.toUpperCase()}`
+                          : '--'}
+                      </strong>
                     </div>
                   </div>
                 </section>

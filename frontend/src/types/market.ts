@@ -94,6 +94,15 @@ export type MarketRegimeState = {
   reason: string | null
 }
 
+export type IcebergSummary = {
+  active: number
+  bid_count: number
+  ask_count: number
+  recent_absorbed_notional: number
+  last_absorption_price: number | null
+  last_absorption_side: string | null
+}
+
 export type OhlcvBar = {
   tick: number
   open: number
@@ -167,6 +176,7 @@ export type LiveSimulationSnapshot = {
   ohlcv_history: OhlcvBar[]
   last_tick: TickReport | null
   market_regime: MarketRegimeState
+  icebergs: IcebergSummary
   whale_balance: WhaleBalanceSnapshot
   last_whale_order: LiveWhaleOrderOutcome | null
   top_agents: TopAgentEntry[]

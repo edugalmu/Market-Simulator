@@ -16,6 +16,9 @@ class MatchResult:
     quantity_matched: float
     quantity_remaining: float
     average_fill_price: float
+    iceberg_absorbed_notional: float = 0.0
+    last_absorption_price: float | None = None
+    last_absorption_side: str | None = None
 
 
 def execute_market_order(
@@ -27,7 +30,7 @@ def execute_market_order(
     if quantity <= 0:
         raise ValueError("Market order quantity must be positive.")
 
-    matched_quantity, matched_notional, trades_executed = _consume_orders(
+    matched_quantity, matched_notional, trades_executed, iceberg_absorbed_notional, last_absorption_price, last_absorption_side = _consume_orders(
         order_book,
         side=OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY,
         quantity=quantity,
@@ -50,6 +53,9 @@ def execute_market_order(
         quantity_matched=round(matched_quantity, 6),
         quantity_remaining=round(max(quantity - matched_quantity, 0.0), 6),
         average_fill_price=average_fill_price,
+        iceberg_absorbed_notional=round(iceberg_absorbed_notional, 6),
+        last_absorption_price=last_absorption_price,
+        last_absorption_side=last_absorption_side,
     )
 
 
@@ -68,6 +74,9 @@ def execute_market_buy_by_notional(
     matched_quantity = 0.0
     matched_notional = 0.0
     trades_executed = 0
+    iceberg_absorbed_notional = 0.0
+    last_absorption_price: float | None = None
+    last_absorption_side: str | None = None
 
     ask_orders = order_book.matching_orders(side=OrderSide.SELL)
     while ask_orders and remaining_notional > 1e-9:
@@ -83,6 +92,10 @@ def execute_market_buy_by_notional(
         matched_notional += fill_notional
         remaining_notional -= fill_notional
         trades_executed += 1
+        if order.is_iceberg:
+            iceberg_absorbed_notional += fill_notional
+            last_absorption_price = order.price
+            last_absorption_side = "ask"
 
         order_book.apply_order_fill(
             side=OrderSide.SELL,
@@ -107,6 +120,9 @@ def execute_market_buy_by_notional(
         quantity_matched=round(matched_quantity, 6),
         quantity_remaining=round(max(requested_quantity - matched_quantity, 0.0), 6),
         average_fill_price=average_fill_price,
+        iceberg_absorbed_notional=round(iceberg_absorbed_notional, 6),
+        last_absorption_price=last_absorption_price,
+        last_absorption_side=last_absorption_side,
     )
 
 
@@ -115,11 +131,14 @@ def _consume_orders(
     *,
     side: OrderSide,
     quantity: float,
-) -> tuple[float, float, int]:
+) -> tuple[float, float, int, float, float | None, str | None]:
     remaining_quantity = quantity
     matched_quantity = 0.0
     matched_notional = 0.0
     trades_executed = 0
+    iceberg_absorbed_notional = 0.0
+    last_absorption_price: float | None = None
+    last_absorption_side: str | None = None
     orders = order_book.matching_orders(side=side)
 
     while orders and remaining_quantity > 1e-9:
@@ -129,8 +148,19 @@ def _consume_orders(
         matched_notional += fill_quantity * order.price
         remaining_quantity -= fill_quantity
         trades_executed += 1
+        if order.is_iceberg:
+            iceberg_absorbed_notional += fill_quantity * order.price
+            last_absorption_price = order.price
+            last_absorption_side = "bid" if side == OrderSide.BUY else "ask"
 
         order_book.apply_order_fill(side=side, order_id=order.order_id, fill_quantity=fill_quantity)
         orders = order_book.matching_orders(side=side)
 
-    return matched_quantity, matched_notional, trades_executed
+    return (
+        matched_quantity,
+        matched_notional,
+        trades_executed,
+        iceberg_absorbed_notional,
+        last_absorption_price,
+        last_absorption_side,
+    )

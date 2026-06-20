@@ -18,6 +18,7 @@ Implementado y verificable en el repositorio:
 - Panel DEV de `Order Book` con bids/asks agregados, spread y profundidad visible desde el snapshot vivo.
 - El `Order Book` de la sesion viva ahora persiste entre ticks: envejece, expira por TTL, se consume con market orders y se refresca de forma parcial.
 - Supervisor de régimen de mercado con fases como `neutral`, `uptrend`, `downtrend`, `panic`, `short_squeeze` y `post_whale_consolidation`, visible en modo DEV.
+- Resumen `icebergs` en el snapshot vivo y panel DEV de absorcion oculta con conteo por lado, absorcion reciente y ultimo nivel observado.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.
@@ -115,7 +116,7 @@ Rutas utiles:
 - Live game start: `http://127.0.0.1:8000/api/v1/simulation/live/game/start`
 - Live whale order: `http://127.0.0.1:8000/api/v1/simulation/live/whale-order`
 
-Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente, ajustar la velocidad entre normal, rapido y muy rapido y jugar un reto corto `Whale Challenge - 60 segundos` con score y resumen final.
+Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente, ajustar la velocidad entre normal, rapido y muy rapido y jugar un reto corto `Whale Challenge - 60 segundos` con score y resumen final. En `Modo DEV` tambien puedes inspeccionar `Market Regime`, `Order Book` y el resumen de `Icebergs` expuesto por el backend.
 
 ## Tests y checks
 
