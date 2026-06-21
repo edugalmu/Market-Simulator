@@ -31,9 +31,9 @@ def bootstrap_simulation(
     settings: Annotated[Settings, Depends(get_settings)],
     seed: int = Query(default=7, ge=1),
     agent_count: int = Query(default=1000, ge=100, le=5000),
-    initial_price: float = Query(default=100.0, gt=0),
+    initial_price: float = Query(default=50_000.0, gt=0),
     initial_cash: float = Query(default=50000.0, gt=0),
-    initial_asset: float = Query(default=1.25, ge=0),
+    initial_asset: float = Query(default=1.0, ge=0),
     compute_mode: Literal["cpu", "gpu_auto", "gpu_force"] = Query(
         default="cpu"
     ),
@@ -61,9 +61,9 @@ def preview_whale_shock(
     notional: float = Query(default=1_000.0, gt=0),
     seed: int = Query(default=7, ge=1),
     agent_count: int = Query(default=1000, ge=100, le=5000),
-    initial_price: float = Query(default=100.0, gt=0),
+    initial_price: float = Query(default=50_000.0, gt=0),
     initial_cash: float = Query(default=50000.0, gt=0),
-    initial_asset: float = Query(default=1.25, ge=0),
+    initial_asset: float = Query(default=1.0, ge=0),
     compute_mode: Literal["cpu", "gpu_auto", "gpu_force"] = Query(
         default="cpu"
     ),
@@ -94,9 +94,9 @@ def start_live_simulation(
     live_service=Depends(get_live_simulation_service),
     seed: int = Query(default=7, ge=1),
     agent_count: int = Query(default=1000, ge=100, le=5000),
-    initial_price: float = Query(default=100.0, gt=0),
+    initial_price: float = Query(default=50_000.0, gt=0),
     initial_cash: float = Query(default=50000.0, gt=0),
-    initial_asset: float = Query(default=1.25, ge=0),
+    initial_asset: float = Query(default=1.0, ge=0),
     tick_interval_ms: int = Query(default=750, ge=100, le=5000),
     compute_mode: Literal["cpu", "gpu_auto", "gpu_force"] = Query(
         default="cpu"

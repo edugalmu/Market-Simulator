@@ -44,13 +44,13 @@ function App() {
     stepLiveSession,
     executeWhaleOrder,
   } = useDashboardData()
-  const [whaleNotionalInput, setWhaleNotionalInput] = useState('3000')
+  const [whaleNotionalInput, setWhaleNotionalInput] = useState('10000')
   const [selectedTimeframe, setSelectedTimeframe] = useState<TimeframeSeconds>(1)
   const [isDevMode, setIsDevMode] = useState(false)
   const [selectedSpeed, setSelectedSpeed] = useState<SimulationSpeed>('normal')
 
-  const whalePresets = [1000, 3000, 10000, 25000]
-  const visibleWhalePresets = isDevMode ? whalePresets : whalePresets.slice(0, 3)
+  const whalePresets = [10000, 30000, 100000]
+  const visibleWhalePresets = whalePresets
   const whaleNotional = Number.parseFloat(whaleNotionalInput.replace(',', '.'))
   const hasValidWhaleNotional = Number.isFinite(whaleNotional) && whaleNotional > 0
   const whaleActionDisabled =
@@ -71,7 +71,7 @@ function App() {
   const fallbackBars = buildGroupedPriceBars(chartPrices, liveSession?.tick ?? 0, selectedTimeframe, simulatedTickIntervalMs).slice(-visibleBarCount)
   const activeChartBars = chartBars.length > 0 ? chartBars : fallbackBars
   const whaleCashTotal = whaleBalance ? whaleBalance.cash_free + whaleBalance.cash_reserved : null
-  const whaleTokenTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
+  const whaleBtcTotal = whaleBalance ? whaleBalance.asset_free + whaleBalance.asset_reserved : null
   const liveOrderBook = liveSession?.order_book ?? null
   const marketRegime = liveSession?.market_regime ?? null
   const liveIcebergs = liveSession?.icebergs ?? null
@@ -82,9 +82,8 @@ function App() {
     && initialWhaleEquity !== null
     ? whaleBalance.total_equity - initialWhaleEquity
     : null
-  const executedPnl = whaleBalance && whaleCashTotal !== null && whaleTokenTotal !== null
-    && initialWhaleEquity !== null
-    ? whaleCashTotal + whaleTokenTotal * whaleBalance.initial_mark_price - initialWhaleEquity
+  const executedPnl = whaleBalance
+    ? whaleBalance.executed_pnl
     : null
   const totalVisibleCapital = totalAgentEquity !== null && whaleBalance
     ? totalAgentEquity + whaleBalance.total_equity
@@ -114,6 +113,12 @@ function App() {
     'Persistir sesiones reales en SQLite y preparar replay.',
     'Reemplazar market orders sinteticas por un matching continuo mas rico.',
     'Emitir snapshots por streaming para evitar polling desde la UI.',
+  ]
+
+  const challengeRules = [
+    'BTC arranca en $50,000 y las carteras comienzan 50/50 entre BTC y dolares.',
+    'La liquidez en dolares del resto del mercado sigue creciendo +3% por minuto.',
+    'El protocolo vende a mercado 4% del supply total de BTC por minuto y la tasa se reduce a la mitad cada minuto, repartida tick a tick.',
   ]
 
   const whaleImpactTone = lastWhaleOrder?.side === 'buy'
@@ -289,11 +294,6 @@ function App() {
                 })}
               </div>
 
-              <div className="market-price-card">
-                <span>Precio</span>
-                <strong>{liveSession ? formatCurrency(liveSession.order_book.mid_price) : '--'}</strong>
-              </div>
-
               {isDevMode ? (
                 <label className="input-stack input-stack--compact">
                   <span>Notional</span>
@@ -301,7 +301,7 @@ function App() {
                     className="control-input control-input--compact"
                     type="number"
                     min="1"
-                    step="100"
+                    step="1000"
                     value={whaleNotionalInput}
                     onChange={(event) => setWhaleNotionalInput(event.target.value)}
                   />
@@ -341,8 +341,8 @@ function App() {
               </strong>
             </div>
             <div className="position-pill">
-              <span>Tokens</span>
-              <strong className="position-pill__value">{formatQuantity(whaleTokenTotal, 4)}</strong>
+              <span>BTC</span>
+              <strong className="position-pill__value">{formatQuantity(whaleBtcTotal, 4)}</strong>
             </div>
             <div className="position-pill">
               <span>Dolares</span>
@@ -372,6 +372,11 @@ function App() {
                   <p className="challenge-card__objective">
                     Objetivo: mueve el mercado y maximiza el P&amp;L ejecutado sin quedarte sin liquidez.
                   </p>
+                  <ul className="bullet-list challenge-card__rules">
+                    {challengeRules.map((rule) => (
+                      <li key={rule}>{rule}</li>
+                    ))}
+                  </ul>
                 </div>
                 <span className={`challenge-status challenge-status--${game?.status ?? 'idle'}`}>
                   {challengeStatusLabel}
@@ -630,7 +635,7 @@ function App() {
           />
           <MetricCard
             label="Precio medio"
-            value={liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : summary ? `$${summary.order_book.mid_price.toFixed(2)}` : '$100.00'}
+              value={liveSession ? `$${liveSession.order_book.mid_price.toFixed(2)}` : summary ? `$${summary.order_book.mid_price.toFixed(2)}` : '$50,000.00'}
           />
           <MetricCard
             label="Compute activo"
@@ -856,11 +861,11 @@ function App() {
               value={whaleBalance ? formatCurrency(whaleBalance.cash_reserved) : '--'}
             />
             <MetricCard
-              label="Asset libre"
+              label="BTC libre"
               value={whaleBalance ? formatQuantity(whaleBalance.asset_free, 4) : '--'}
             />
             <MetricCard
-              label="Asset reservado"
+              label="BTC reservado"
               value={whaleBalance ? formatQuantity(whaleBalance.asset_reserved, 4) : '--'}
             />
             <MetricCard

@@ -299,6 +299,12 @@
   color: rgba(233, 237, 243, 0.72);
 }
 
+.challenge-card__rules {
+  margin-top: 0.15rem;
+  color: rgba(233, 237, 243, 0.74);
+  max-width: 70ch;
+}
+
 .challenge-status {
   display: inline-flex;
   align-items: center;

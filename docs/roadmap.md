@@ -75,6 +75,10 @@ Avance parcial ya implementado:
 - el libro ya no se resembra completo por tick: ahora conserva ordenes limit en memoria, aplica expiracion TTL, cancelaciones parciales y refresco gradual de liquidez.
 - la sesion viva ya expone y usa un `market_regime` real que modifica gaps, sesgos, volatilidad, liquidez y reacciones post-ballena.
 - la sesion viva ya expone un resumen `icebergs` con conteo por lado, absorcion reciente y ultimo nivel observado para paneles DEV.
+- la absorcion contextual ya se ajusto para verse tanto en compras como en ventas de la ballena, con defensa bid/ask mas cercana al mejor precio cuando corresponde.
+- `whale_balance.executed_pnl` ya es autoritativo en backend y la UI lo usa tanto en compras como en ventas.
+- el mercado vivo y el bootstrap ya operan en escala BTC con `initial_price=50000`, carteras 50/50 BTC/USD, liquidez calibrada por nocional y presets de ballena `10,000` / `30,000` / `100,000`.
+- la sesion viva ya introduce una presion sistemica de oferta vendiendo el `4%` del supply total de BTC por minuto, con halving de tasa cada minuto y reparto tick a tick, mientras la liquidez en dolares no jugadora sigue creciendo `+3%` por minuto.
 - `recent_mid_prices` se mantiene como fallback visual si todavia no hay suficientes barras para dibujar velas.
 
 ## Fase 3. Persistencia y replay
@@ -108,7 +112,7 @@ Aceptacion:
 - criterio claro de cuando activar GPU;
 - estabilidad de simulacion.
 
-Estado actual: implementada y verificada mediante `.cmd` y `.exe`.
+Estado actual: pendiente como fase formal. Existen mejoras puntuales de rendering y velocidad de loop, pero todavia no hay benchmarks guardados ni perfilado versionado que cierre esta fase.
 
 ## Fase 5. GPU opcional
 
@@ -138,7 +142,7 @@ Opciones:
 - browser local;
 - empaquetado desktop.
 
-Estado actual: pendiente.
+Estado actual: implementada para uso local Windows mediante `Market Simulator.cmd` y `release/MarketSimulator.exe`.
 
 ## Fase 7. Migracion a web
 

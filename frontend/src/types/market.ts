@@ -191,6 +191,7 @@ export type WhaleBalanceSnapshot = {
   cash_reserved: number
   asset_free: number
   asset_reserved: number
+  executed_pnl: number
   initial_cash: number
   initial_asset: number
   initial_mark_price: number

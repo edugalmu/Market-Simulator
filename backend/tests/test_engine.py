@@ -2,7 +2,7 @@ from app.core.events import OrderSide
 from app.core.matching import execute_market_order
 from app.core.order_book import OrderBook
 from app.simulation.engine import SimulationEngine
-from app.simulation.live import LiveSimulationService, REGIME_PARAMS
+from app.simulation.live import LiveSimulationService, REGIME_PARAMS, _btc_emission_rate_for_minute
 from app.simulation.models import SessionConfig
 
 
@@ -29,6 +29,21 @@ def test_bootstrap_session_respects_target_agent_count() -> None:
     assert summary.metrics.active_compute_backend == "cpu"
 
 
+def test_default_session_config_starts_btc_market_at_fifty_thousand() -> None:
+    config = SessionConfig()
+
+    assert config.initial_price == 50_000.0
+    assert config.initial_cash == 50_000.0
+    assert config.initial_asset == 1.0
+    assert config.initial_asset * config.initial_price == config.initial_cash
+
+
+def test_btc_emission_rate_halves_each_minute() -> None:
+    assert _btc_emission_rate_for_minute(0) == 0.04
+    assert _btc_emission_rate_for_minute(1) == 0.02
+    assert _btc_emission_rate_for_minute(2) == 0.01
+
+
 def test_gpu_auto_falls_back_to_cpu_when_disabled() -> None:
     engine = SimulationEngine(gpu_enabled=False)
     summary = engine.bootstrap_session(SessionConfig(compute_mode="gpu_auto"))
@@ -41,7 +56,7 @@ def test_whale_sell_preview_consumes_bid_depth_and_moves_price() -> None:
     preview = engine.preview_whale_shock(
         SessionConfig(),
         side="sell",
-        notional=3_000.0,
+        notional=100_000.0,
     )
 
     assert preview.shock.side == "sell"
@@ -106,6 +121,47 @@ def test_live_whale_order_uses_current_session_state() -> None:
     assert response.whale_order.mid_price_before == before.order_book.mid_price
     assert response.whale_order.mid_price_after >= response.whale_order.mid_price_before
     assert response.whale_balance.cash_free >= 0
+
+
+def test_live_whale_buy_updates_executed_pnl() -> None:
+    service = LiveSimulationService()
+    before = service.start(SessionConfig(seed=31), gpu_enabled=False, auto_run=False)
+
+    response = service.execute_whale_order(side="buy", notional=3_000.0)
+    service.reset()
+
+    assert before.whale_balance.executed_pnl == 0
+    assert response.snapshot.whale_balance.executed_pnl != 0
+
+
+def test_live_whale_sell_updates_executed_pnl() -> None:
+    service = LiveSimulationService()
+    before = service.start(SessionConfig(seed=32), gpu_enabled=False, auto_run=False)
+
+    response = service.execute_whale_order(side="sell", notional=3_000.0)
+    service.reset()
+
+    assert before.whale_balance.executed_pnl == 0
+    assert response.snapshot.whale_balance.executed_pnl != 0
+
+
+def test_live_session_applies_btc_emission_sell_pressure_each_tick() -> None:
+    service = LiveSimulationService()
+    service.start(SessionConfig(seed=33), gpu_enabled=False, auto_run=False)
+    session = service._session
+    assert session is not None
+
+    session.profiles = []
+    session.runtime_state = {}
+    session.rival_whales = []
+
+    advanced = service.step(ticks=1)
+    service.reset()
+
+    assert advanced.last_tick is not None
+    assert advanced.last_tick.sell_orders >= 1
+    assert advanced.last_tick.matched_quantity > 0
+    assert advanced.ohlcv_history[-1].volume > 0
 
 
 def test_live_ohlcv_history_marks_whale_buy_and_sell_events() -> None:
@@ -688,7 +744,7 @@ def test_large_whale_sell_can_absorb_forced_bid_iceberg_near_best_bid() -> None:
         reference_price=session.order_book.best_bid or session.last_price,
         hidden_scale=0.8,
     )
-    response = service.execute_whale_order(side="sell", notional=25_000.0)
+    response = service.execute_whale_order(side="sell", notional=100_000.0)
     current_orders = session.order_book.bid_orders + session.order_book.ask_orders
     service.reset()
 
@@ -712,6 +768,14 @@ def test_live_session_whale_starts_with_one_fifth_of_total_capital() -> None:
     whale_share = snapshot.whale_balance.initial_total_equity / total_capital
 
     assert round(whale_share, 2) == 0.20
+
+
+def test_session_config_starts_with_half_btc_half_cash_at_50000() -> None:
+    config = SessionConfig(seed=63)
+    btc_value = config.initial_asset * config.initial_price
+
+    assert round(config.initial_price, 2) == 50_000.00
+    assert round(btc_value, 2) == round(config.initial_cash, 2)
 
 
 def test_live_session_starts_with_neutral_whale_pnl_after_preload() -> None:

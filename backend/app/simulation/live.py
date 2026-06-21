@@ -15,6 +15,7 @@ from app.core.ledger import AgentBalance, Ledger
 from app.core.matching import MatchResult, execute_market_buy_by_notional, execute_market_order
 from app.core.order_book import OrderBook
 from app.simulation.engine import SimulationEngine
+from app.simulation.metrics import calculate_trade_execution_pnl, quantity_for_notional
 from app.simulation.models import (
     AgentMixEntry,
     GameFinalResult,
@@ -47,6 +48,9 @@ RIVAL_WHALE_LEVERAGE_MIN = 1.4
 RIVAL_WHALE_LEVERAGE_MAX = 3.2
 MONEY_GROWTH_INTERVAL_TICKS = 60
 MONEY_GROWTH_MULTIPLIER = 1.03
+BTC_EMISSION_INTERVAL_TICKS = 60
+BTC_EMISSION_INITIAL_RATE = 0.04
+BTC_EMISSION_HALVING_FACTOR = 0.5
 TEN_MINUTE_SENTIMENT_INTERVAL_TICKS = 10 * 60
 ONE_MINUTE_SENTIMENT_INTERVAL_TICKS = 60
 WHALE_AGENT_ID = 0
@@ -75,6 +79,8 @@ ICEBERG_WHALE_BUY_DEFENSE_DISTANCE_RANGE = (0, 1)
 ICEBERG_WHALE_SELL_DEFENSE_DISTANCE_RANGE = (0, 3)
 ICEBERG_RECENT_LOOKBACK_BARS = 8
 ICEBERG_MAX_ROUND_DISTANCE_BPS = 70.0
+START_DEPTH_BASE_NOTIONAL = 8_000.0
+SEEDED_BOOK_BASE_NOTIONAL = 12_000.0
 ICEBERG_REGIME_MULTIPLIERS = {
     "accumulation": 1.8,
     "distribution": 1.8,
@@ -301,6 +307,10 @@ class LiveSessionState:
     whale_initial_asset: float
     whale_initial_mark_price: float
     whale_initial_total_equity: float
+    whale_executed_pnl: float
+    btc_emitted_total: float
+    btc_emission_minute_index: int
+    btc_emission_quantity_per_tick: float
     preloaded_ticks_total: int
     preload_pattern: str
     rival_whales: list[RivalWhaleState]
@@ -350,7 +360,10 @@ class LiveSimulationService:
 
         engine = SimulationEngine(gpu_enabled=gpu_enabled)
         active_backend, profiles, ledger, order_book = engine.build_market_state(config)
-        order_book.ensure_depth_around(config.initial_price, base_quantity=8.0)
+        order_book.ensure_depth_around(
+            config.initial_price,
+            base_quantity=quantity_for_notional(notional=START_DEPTH_BASE_NOTIONAL, price=config.initial_price),
+        )
         rng = Random(config.seed)
         whale_initial_cash, whale_initial_asset = _build_whale_initial_portfolio(
             config,
@@ -398,6 +411,10 @@ class LiveSimulationService:
             whale_initial_asset=whale_initial_asset,
             whale_initial_mark_price=config.initial_price,
             whale_initial_total_equity=whale_initial_total_equity,
+            whale_executed_pnl=0.0,
+            btc_emitted_total=0.0,
+            btc_emission_minute_index=-1,
+            btc_emission_quantity_per_tick=0.0,
             preloaded_ticks_total=preloaded_tick_count,
             preload_pattern=preload_pattern,
             rival_whales=rival_whales,
@@ -675,6 +692,18 @@ class LiveSimulationService:
         matched_quantity = 0.0
         observed_prices = [price_before]
 
+        emission_flow = self._execute_btc_emission_locked(
+            session,
+            current_price=price_before,
+        )
+        buy_orders += emission_flow[0]
+        sell_orders += emission_flow[1]
+        trades_executed += emission_flow[2]
+        matched_notional += emission_flow[3]
+        matched_quantity += emission_flow[4]
+        observed_prices.extend(emission_flow[5])
+        emission_pressure_bps = emission_flow[6]
+
         for profile in sampled_profiles:
             runtime = session.runtime_state[profile.agent_id]
             if session.tick - runtime.last_action_tick <= runtime.cooldown_ticks:
@@ -725,6 +754,7 @@ class LiveSimulationService:
                 + _preload_pattern_bias_bps(session)
                 + _market_mood_bias_bps(session)
                 + _market_regime_drift_bps(session)
+                + emission_pressure_bps
                 + rival_pressure_bps
                 + session.rng.uniform(-0.8, 0.8),
                 16.0 * session.market_regime.volatility_multiplier,
@@ -735,7 +765,10 @@ class LiveSimulationService:
         self._maybe_spawn_contextual_iceberg_locked(session, reference_price=reference_price)
         session.order_book.ensure_depth_around(
             reference_price,
-            base_quantity=_base_liquidity_for_bias(session.structural_bias_bps) * session.market_regime.liquidity_multiplier,
+            base_quantity=quantity_for_notional(
+                notional=_base_liquidity_for_bias(session.structural_bias_bps) * session.market_regime.liquidity_multiplier,
+                price=reference_price,
+            ),
             created_tick=session.tick,
             ttl_ticks=8,
             strategy_type=StrategyType.MARKET_MAKER.value,
@@ -877,6 +910,16 @@ class LiveSimulationService:
         session.structural_bias_bps = max(
             min(session.structural_bias_bps * 0.35 + price_impact_bps * 0.85, MAX_SHOCK_BIAS_BPS),
             -MAX_SHOCK_BIAS_BPS,
+        )
+        session.whale_executed_pnl = round(
+            session.whale_executed_pnl
+            + calculate_trade_execution_pnl(
+                side=side,
+                quantity=result.quantity_matched,
+                price_before=price_before,
+                average_fill_price=result.average_fill_price,
+            ),
+            6,
         )
         session.cumulative_trades += result.trades_executed
         session.cumulative_matched_notional += result.matched_notional
@@ -1044,6 +1087,56 @@ class LiveSimulationService:
                 whale.cash *= MONEY_GROWTH_MULTIPLIER
 
             session.next_cash_growth_tick += MONEY_GROWTH_INTERVAL_TICKS
+
+    def _execute_btc_emission_locked(
+        self,
+        session: LiveSessionState,
+        *,
+        current_price: float,
+    ) -> tuple[int, int, int, float, float, list[float], float]:
+        ticks_since_start = session.tick - session.preloaded_ticks_total
+        if ticks_since_start <= 0:
+            return (0, 0, 0, 0.0, 0.0, [], 0.0)
+
+        minute_index = max((ticks_since_start - 1) // BTC_EMISSION_INTERVAL_TICKS, 0)
+        if minute_index != session.btc_emission_minute_index:
+            session.btc_emission_minute_index = minute_index
+            session.btc_emission_quantity_per_tick = round(
+                _current_total_btc_supply(session)
+                * _btc_emission_rate_for_minute(minute_index)
+                / BTC_EMISSION_INTERVAL_TICKS,
+                6,
+            )
+
+        emitted_quantity = session.btc_emission_quantity_per_tick
+        if emitted_quantity <= 1e-9:
+            return (0, 0, 0, 0.0, 0.0, [], 0.0)
+
+        session.btc_emitted_total = round(session.btc_emitted_total + emitted_quantity, 6)
+        result = execute_market_order(
+            session.order_book,
+            side=OrderSide.SELL,
+            quantity=emitted_quantity,
+        )
+        self._record_iceberg_absorption_locked(session, result)
+
+        observed_prices: list[float] = []
+        if result.trades_executed > 0:
+            observed_prices.append(session.order_book.mid_price or result.average_fill_price or current_price)
+
+        pressure_bps = 0.0
+        if result.matched_notional > 0:
+            pressure_bps = -min(result.matched_notional / 40_000, 10.0)
+
+        return (
+            0,
+            1,
+            result.trades_executed,
+            result.matched_notional,
+            result.quantity_matched,
+            observed_prices,
+            pressure_bps,
+        )
 
     def _record_iceberg_absorption_locked(self, session: LiveSessionState, match_result: MatchResult) -> None:
         if match_result.iceberg_absorbed_notional <= 0:
@@ -1367,6 +1460,7 @@ class LiveSimulationService:
             cash_reserved=round(whale_balance.cash_reserved, 6),
             asset_free=round(whale_balance.asset_free, 6),
             asset_reserved=round(whale_balance.asset_reserved, 6),
+            executed_pnl=round(session.whale_executed_pnl, 6),
             initial_cash=round(session.whale_initial_cash, 6),
             initial_asset=round(session.whale_initial_asset, 6),
             initial_mark_price=round(session.whale_initial_mark_price, 6),
@@ -1489,6 +1583,10 @@ class LiveSimulationService:
             whale_initial_cash + whale_initial_asset * session.last_price,
             6,
         )
+        session.whale_executed_pnl = 0.0
+        session.btc_emitted_total = 0.0
+        session.btc_emission_minute_index = -1
+        session.btc_emission_quantity_per_tick = 0.0
         session.rival_whales = _build_rival_whales(
             total_agent_equity=current_agent_equity,
             reference_price=session.last_price,
@@ -1951,12 +2049,18 @@ def _empty_game_score_breakdown() -> dict[str, float]:
 
 
 def _calculate_executed_pnl(session: LiveSessionState) -> float:
-    whale_balance = session.whale_ledger.get_balance(WHALE_AGENT_ID)
-    cash_total = whale_balance.cash_free + whale_balance.cash_reserved
-    asset_total = whale_balance.asset_free + whale_balance.asset_reserved
-    initial_equity = session.whale_initial_total_equity
+    return session.whale_executed_pnl
 
-    return cash_total + asset_total * session.whale_initial_mark_price - initial_equity
+
+def _btc_emission_rate_for_minute(minute_index: int) -> float:
+    return BTC_EMISSION_INITIAL_RATE * (BTC_EMISSION_HALVING_FACTOR ** max(minute_index, 0))
+
+
+def _current_total_btc_supply(session: LiveSessionState) -> float:
+    whale_balance = session.whale_ledger.get_balance(WHALE_AGENT_ID)
+    whale_supply = whale_balance.asset_free + whale_balance.asset_reserved
+    rival_supply = sum(whale.asset for whale in session.rival_whales)
+    return round(session.ledger.total_inventory() + whale_supply + rival_supply + session.btc_emitted_total, 6)
 
 
 def _build_rival_whales(
@@ -2052,9 +2156,10 @@ def _build_iceberg_price(
         candidates.append(rounded_level)
 
     if side == OrderSide.BUY:
-        valid = [price for price in candidates if price < reference_price]
+        best_bid = session.order_book.best_bid or reference_price
+        valid = [price for price in candidates if price <= best_bid]
         if not valid:
-            fallback = reference_price - max(reference_price * 0.0008, 0.02)
+            fallback = best_bid - max(reference_price * 0.0008, 0.02)
             return round(max(fallback, 0.01), 2)
         return round(max(valid), 2)
 
@@ -2178,10 +2283,10 @@ def _decay_bias(value: float) -> float:
 
 def _base_liquidity_for_bias(structural_bias_bps: float) -> float:
     if abs(structural_bias_bps) >= 25:
-        return 20.0
+        return 20_000.0
     if abs(structural_bias_bps) >= 10:
-        return 24.0
-    return 28.0
+        return 24_000.0
+    return 28_000.0
 
 
 _live_simulation_service = LiveSimulationService()

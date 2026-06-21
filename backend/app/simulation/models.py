@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 class SessionConfig(BaseModel):
     seed: int = 7
     agent_count: int = 1000
-    initial_price: float = 100.0
+    initial_price: float = 50_000.0
     initial_cash: float = 50000.0
-    initial_asset: float = 1.25
+    initial_asset: float = 1.0
     compute_mode: Literal["cpu", "gpu_auto", "gpu_force"] = "cpu"
 
 
@@ -122,6 +122,7 @@ class WhaleBalanceSnapshot(BaseModel):
     cash_reserved: float
     asset_free: float
     asset_reserved: float
+    executed_pnl: float
     initial_cash: float
     initial_asset: float
     initial_mark_price: float

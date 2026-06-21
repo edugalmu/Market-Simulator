@@ -6,7 +6,7 @@ from app.core.events import OrderSide
 from app.core.ledger import Ledger
 from app.core.matching import execute_market_buy_by_notional, execute_market_order
 from app.core.order_book import OrderBook
-from app.simulation.metrics import calculate_market_cap, calculate_spread_bps
+from app.simulation.metrics import calculate_market_cap, calculate_spread_bps, calculate_trade_execution_pnl, quantity_for_notional
 from app.simulation.models import (
     AgentMixEntry,
     MarketMetrics,
@@ -155,6 +155,12 @@ class SimulationEngine:
             ((book_after.mid_price - book_before.mid_price) / book_before.mid_price) * 10_000,
             4,
         )
+        executed_pnl = calculate_trade_execution_pnl(
+            side=side,
+            quantity=match_result.quantity_matched,
+            price_before=reference_price,
+            average_fill_price=match_result.average_fill_price,
+        )
 
         notes = [
             f"Whale {side.value} preview executed against seeded liquidity.",
@@ -184,6 +190,7 @@ class SimulationEngine:
                 cash_reserved=round(whale_balance.cash_reserved, 6),
                 asset_free=round(whale_balance.asset_free, 6),
                 asset_reserved=round(whale_balance.asset_reserved, 6),
+                executed_pnl=round(executed_pnl, 6),
                 initial_cash=whale_initial_cash,
                 initial_asset=whale_initial_asset,
                 initial_mark_price=reference_price,
@@ -213,7 +220,11 @@ class SimulationEngine:
         ledger = Ledger.from_profiles(profiles)
 
         order_book = OrderBook()
-        order_book.seed_around(config.initial_price, ttl_ticks=24)
+        order_book.seed_around(
+            config.initial_price,
+            ttl_ticks=24,
+            base_quantity=quantity_for_notional(notional=12_000.0, price=config.initial_price),
+        )
 
         return active_backend, profiles, ledger, order_book
 

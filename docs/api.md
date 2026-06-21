@@ -50,9 +50,9 @@ Modelo:
 {
   "seed": 7,
   "agent_count": 1000,
-  "initial_price": 100.0,
+  "initial_price": 50000.0,
   "initial_cash": 50000.0,
-  "initial_asset": 1.25,
+  "initial_asset": 1.0,
   "compute_mode": "cpu"
 }
 ```
@@ -67,9 +67,9 @@ Parametros query:
 
 - `seed`: entero `>= 1`, por defecto `7`.
 - `agent_count`: entero entre `100` y `5000`, por defecto `1000`.
-- `initial_price`: numero `> 0`, por defecto `100.0`.
+- `initial_price`: numero `> 0`, por defecto `50000.0`.
 - `initial_cash`: numero `> 0`, por defecto `50000.0`.
-- `initial_asset`: numero `>= 0`, por defecto `1.25`.
+- `initial_asset`: numero `>= 0`, por defecto `1.0`.
 - `compute_mode`: `cpu`, `gpu_auto` o `gpu_force`, por defecto `cpu`.
 
 Respuesta resumida:
@@ -81,27 +81,27 @@ Respuesta resumida:
   "config": {
     "seed": 7,
     "agent_count": 1000,
-    "initial_price": 100.0,
+    "initial_price": 50000.0,
     "initial_cash": 50000.0,
-    "initial_asset": 1.25,
+    "initial_asset": 1.0,
     "compute_mode": "cpu"
   },
   "agent_mix": [
     { "strategy": "noise", "count": 450 }
   ],
   "order_book": {
-    "best_bid": 99.9,
-    "best_ask": 100.1,
-    "mid_price": 100.0,
+    "best_bid": 49950.0,
+    "best_ask": 50050.0,
+    "mid_price": 50000.0,
     "spread_bps": 20.0,
-    "bid_depth": 124.8,
-    "ask_depth": 124.8,
-    "bids": [{ "price": 99.9, "quantity": 12.0, "orders": 5 }],
-    "asks": [{ "price": 100.1, "quantity": 12.0, "orders": 5 }]
+    "bid_depth": 2.496,
+    "ask_depth": 2.496,
+    "bids": [{ "price": 49950.0, "quantity": 0.2496, "orders": 5 }],
+    "asks": [{ "price": 50050.0, "quantity": 0.2496, "orders": 5 }]
   },
   "metrics": {
-    "market_cap": 125000.0,
-    "average_agent_equity": 50125.0,
+    "market_cap": 62500000.0,
+    "average_agent_equity": 100000.0,
     "total_asset_inventory": 1250.0,
     "active_compute_backend": "cpu"
   },
@@ -128,9 +128,9 @@ Parametros query:
 - `notional`: numero `> 0`, por defecto `1000.0`.
 - `seed`: entero `>= 1`, por defecto `7`.
 - `agent_count`: entero entre `100` y `5000`, por defecto `1000`.
-- `initial_price`: numero `> 0`, por defecto `100.0`.
+- `initial_price`: numero `> 0`, por defecto `50000.0`.
 - `initial_cash`: numero `> 0`, por defecto `50000.0`.
-- `initial_asset`: numero `>= 0`, por defecto `1.25`.
+- `initial_asset`: numero `>= 0`, por defecto `1.0`.
 - `compute_mode`: `cpu`, `gpu_auto` o `gpu_force`, por defecto `cpu`.
 
 Respuesta resumida:
@@ -141,36 +141,37 @@ Respuesta resumida:
   "config": {
     "seed": 7,
     "agent_count": 1000,
-    "initial_price": 100.0,
+    "initial_price": 50000.0,
     "initial_cash": 50000.0,
-    "initial_asset": 1.25,
+    "initial_asset": 1.0,
     "compute_mode": "cpu"
   },
   "shock": {
     "side": "sell",
     "requested_notional": 3000.0,
-    "requested_quantity": 30.0,
-    "matched_notional": 2993.4,
-    "matched_quantity": 30.0,
+    "requested_quantity": 0.06,
+    "matched_notional": 2995.8,
+    "matched_quantity": 0.06,
     "quantity_remaining": 0.0,
-    "average_fill_price": 99.78,
-    "trades_executed": 3,
-    "price_impact_bps": -18.0
+    "average_fill_price": 49930.0,
+    "trades_executed": 2,
+    "price_impact_bps": -6.5
   },
   "order_book_before": {},
   "order_book_after": {},
   "whale_balance": {
-    "cash_free": 2993.4,
+    "cash_free": 2995.8,
     "cash_reserved": 0.0,
     "asset_free": 0.0,
     "asset_reserved": 0.0,
-    "total_equity": 2993.4
+    "executed_pnl": -4.2,
+    "total_equity": 2995.8
   },
   "notes": []
 }
 ```
 
-La respuesta real incluye snapshots completos de `order_book_before` y `order_book_after`.
+La respuesta real incluye snapshots completos de `order_book_before` y `order_book_after`, junto con `whale_balance.executed_pnl` para reflejar el P&L ejecutado del barrido.
 
 Errores:
 
@@ -185,9 +186,9 @@ Parametros query:
 
 - `seed`: entero `>= 1`, por defecto `7`.
 - `agent_count`: entero entre `100` y `5000`, por defecto `1000`.
-- `initial_price`: numero `> 0`, por defecto `100.0`.
+- `initial_price`: numero `> 0`, por defecto `50000.0`.
 - `initial_cash`: numero `> 0`, por defecto `50000.0`.
-- `initial_asset`: numero `>= 0`, por defecto `1.25`.
+- `initial_asset`: numero `>= 0`, por defecto `1.0`.
 - `tick_interval_ms`: entero entre `100` y `5000`, por defecto `750`.
 - `compute_mode`: `cpu`, `gpu_auto` o `gpu_force`, por defecto `cpu`.
 
@@ -202,16 +203,16 @@ Respuesta resumida:
   "simulated_tick_interval_ms": 1000,
   "config": {},
   "order_book": {
-    "mid_price": 100.0
+    "mid_price": 50000.0
   },
-  "recent_mid_prices": [100.0, 100.0],
+  "recent_mid_prices": [50000.0, 50000.0],
   "ohlcv_history": [
     {
       "tick": 1,
-      "open": 100.0,
-      "high": 100.0,
-      "low": 100.0,
-      "close": 100.0,
+      "open": 50000.0,
+      "high": 50000.0,
+      "low": 50000.0,
+      "close": 50000.0,
       "volume": 0.0,
       "trades": 0,
       "whale_side": null,
@@ -223,25 +224,26 @@ Respuesta resumida:
     "active_agents": 23,
     "trades_executed": 23,
     "price_change_bps": 0.0,
-    "mid_price": 100.0
+    "mid_price": 50000.0
   },
   "whale_balance": {
-    "cash_free": 6265625.0,
+    "cash_free": 12500000.0,
     "cash_reserved": 0.0,
-    "asset_free": 62656.25,
+    "asset_free": 250.0,
     "asset_reserved": 0.0,
-    "initial_cash": 6265625.0,
-    "initial_asset": 62656.25,
-    "initial_mark_price": 100.16,
-    "initial_total_equity": 12531250.0,
-    "total_equity": 12531250.0
+    "executed_pnl": 0.0,
+    "initial_cash": 12500000.0,
+    "initial_asset": 250.0,
+    "initial_mark_price": 50000.0,
+    "initial_total_equity": 25000000.0,
+    "total_equity": 25000000.0
   },
   "top_agents": [
     {
       "agent_id": 381,
       "alias": "Nova Partners",
       "strategy": "momentum",
-      "equity": 50312.44
+      "equity": 100312.44
     }
   ]
   }
@@ -275,7 +277,7 @@ Respuesta resumida:
   "tick_interval_ms": 125,
   "config": {},
   "order_book": {
-    "mid_price": 100.52
+    "mid_price": 50052.0
   }
 }
 ```
@@ -304,7 +306,9 @@ Campos principales:
 - `recent_mid_prices`: traza compacta de mid-prices recientes para fallback visual.
 - `ohlcv_history`: barras autoritativas por tick con `tick`, `open`, `high`, `low`, `close`, `volume`, `trades` y metadato opcional de ballena.
 - `last_tick`: resumen del ultimo tick ejecutado.
+- `whale_balance.executed_pnl`: P&L ejecutado acumulado de las ordenes de ballena, medido contra el mid-price previo a cada ejecucion; cambia tanto en compras como en ventas.
 - `whale_balance.initial_cash`, `initial_asset`, `initial_mark_price` e `initial_total_equity`: baseline inicial de la ballena para P&L y reparto de capital.
+- Reglas base de la partida: el mercado arranca con BTC en `50000`, las carteras parten 50/50 entre BTC y dolares, el capital en dolares del resto del mercado sigue creciendo `+3%` por minuto y el protocolo vende a mercado el `4%` del supply total de BTC por minuto, reduciendo esa tasa a la mitad cada minuto y repartiendo la venta tick a tick.
 - `top_agents`: ranking resumido de los diez agentes con mayor equity actual, pensado para la UI DEV.
 - `market_regime`: estado de régimen activo con sesgos, multiplicadores, probabilidad de gaps y `reason` para explicar transiciones o shocks.
 - `icebergs`: resumen de liquidez oculta con `active`, `bid_count`, `ask_count`, `recent_absorbed_notional`, `last_absorbed_notional`, `last_absorption_price`, `last_absorption_side` y `ticks_since_absorption`.
@@ -321,7 +325,7 @@ Ejemplo parcial del bloque `icebergs`:
     "ask_count": 1,
     "recent_absorbed_notional": 12500.0,
     "last_absorbed_notional": 8200.0,
-    "last_absorption_price": 70.0,
+    "last_absorption_price": 50020.0,
     "last_absorption_side": "ask",
     "ticks_since_absorption": 0
   }
@@ -430,19 +434,19 @@ Respuesta resumida:
     "status": "running",
     "tick": 29,
     "order_book": {
-      "mid_price": 100.31
+      "mid_price": 50031.0
     },
     "ohlcv_history": [
       {
         "tick": 29,
-        "open": 100.16,
-        "high": 100.38,
-        "low": 100.16,
-        "close": 100.31,
-        "volume": 29.887,
+        "open": 50016.0,
+        "high": 50038.0,
+        "low": 50016.0,
+        "close": 50031.0,
+        "volume": 0.059916,
         "trades": 4,
         "whale_side": "buy",
-        "whale_impact_bps": 14.98
+        "whale_impact_bps": 3.0
       }
     ],
     "last_whale_order": {
@@ -450,19 +454,19 @@ Respuesta resumida:
       "impact_label": "BUY IMPACT",
       "requested_notional": 3000.0,
       "matched_notional": 3000.0,
-      "matched_quantity": 29.887,
-      "average_fill_price": 100.38,
+      "matched_quantity": 0.059916,
+      "average_fill_price": 50038.0,
       "trades_executed": 4,
-      "mid_price_before": 100.16,
-      "mid_price_after": 100.31,
-      "absolute_price_change": 0.15,
-      "price_impact_bps": 14.98,
-      "remaining_side_depth": 78.913
+      "mid_price_before": 50016.0,
+      "mid_price_after": 50031.0,
+      "absolute_price_change": 15.0,
+      "price_impact_bps": 3.0,
+      "remaining_side_depth": 1.57826
     },
     "whale_balance": {
-      "cash_free": 247000.0,
-      "asset_free": 5029.887,
-      "total_equity": 751547.97
+      "cash_free": 12497000.0,
+      "asset_free": 250.059916,
+      "total_equity": 25004800.0
     }
   },
   "whale_order": {},

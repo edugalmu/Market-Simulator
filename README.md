@@ -14,13 +14,16 @@ Implementado y verificable en el repositorio:
 - Bootstrap deterministico de 1,000 agentes por defecto.
 - Sesion viva minima en memoria con ticks automaticos y controles de iniciar, detener, avanzar y operar como ballena.
 - Grafica principal con OHLCV real por tick desde backend en la UI, con agrupacion visual 1s/5s/10s/30s/1 min, ventana reciente limitada para no saturar la vista y fallback local si aun faltan barras suficientes.
+- Mercado bootstrap y sesion viva ya calibrados en escala BTC: precio inicial `50,000`, carteras de arranque 50/50 entre BTC y dolares y liquidez base expresada por nocional para mantener jugabilidad en ese rango.
 - Primer minijuego local `Whale Challenge - 60 segundos` con score, contador, resumen final y reinicio sobre la misma sesion viva.
+- La UI de trading ya opera sobre BTC con presets `10,000` / `30,000` / `100,000`, muestra saldos en BTC y Dolares y elimina la tarjeta redundante de precio sobre la barra de ordenes.
 - Panel DEV de `Order Book` con bids/asks agregados, spread y profundidad visible desde el snapshot vivo.
 - El `Order Book` de la sesion viva ahora persiste entre ticks: envejece, expira por TTL, se consume con market orders y se refresca de forma parcial.
 - Supervisor de régimen de mercado con fases como `neutral`, `uptrend`, `downtrend`, `panic`, `short_squeeze` y `post_whale_consolidation`, visible en modo DEV.
 - Resumen `icebergs` en el snapshot vivo y panel DEV de absorcion oculta con conteo por lado, absorcion reciente y ultimo nivel observado.
 - Order book sembrado alrededor de un precio inicial para snapshots.
 - Ledger inicial con saldos libres/reservados y calculo de equity.
+- `whale_balance.executed_pnl` ya es el P&L ejecutado autoritativo del backend para compras y ventas, y la sesion viva aplica una venta protocolaria del `4%` del supply total de BTC por minuto con halving de tasa cada minuto mientras la liquidez en dolares no jugadora sigue creciendo `+3%` por minuto.
 - Configuracion de compute mode con `cpu`, `gpu_auto` y `gpu_force`.
 - Tests backend para health, bootstrap, simulacion viva y ordenes de ballena sobre sesion viva.
 
@@ -116,7 +119,7 @@ Rutas utiles:
 - Live game start: `http://127.0.0.1:8000/api/v1/simulation/live/game/start`
 - Live whale order: `http://127.0.0.1:8000/api/v1/simulation/live/whale-order`
 
-Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente, ajustar la velocidad entre normal, rapido y muy rapido y jugar un reto corto `Whale Challenge - 60 segundos` con score y resumen final. En `Modo DEV` tambien puedes inspeccionar `Market Regime`, `Order Book` y el resumen de `Icebergs` expuesto por el backend.
+Al cargar la app integrada, la UI intenta recuperar una sesion viva. Si no existe ninguna, crea una nueva automaticamente y empieza a avanzar ticks en memoria. Esa partida arranca en el mercado BTC de `50,000` USD, con reglas visibles en el reto y controles de orden pensados para notionales `10,000`, `30,000` y `100,000`. Desde esa misma vista puedes lanzar `Whale Buy` y `Whale Sell` para impactar el libro vivo actual, cambiar entre velas 1s/5s/10s/30s/1 min, limitar la vista a la ventana reciente, ajustar la velocidad entre normal, rapido y muy rapido y jugar un reto corto `Whale Challenge - 60 segundos` con score y resumen final. En `Modo DEV` tambien puedes inspeccionar `Market Regime`, `Order Book` y el resumen de `Icebergs` expuesto por el backend.
 
 ## Tests y checks
 
